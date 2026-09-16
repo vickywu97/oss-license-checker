@@ -1,0 +1,13 @@
+# web framework
+django==4.2.0
+flask==3.0.0
+requests==2.31.0
+numpy==1.26.0
+pandas==2.1.0
+# database drivers（注意 license 陷阱）
+mysqlclient==2.2.0
+psycopg2-binary==2.9.9
+redis==5.0.0
+# pdf / 打印（AGPL 陷阱）
+pymupdf==1.23.0
+ghostscript==0.0.1

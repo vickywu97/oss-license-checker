@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "oss-license-checker"
+version = "0.1.0"
+description = "离线开源许可证合规判定工具：解析依赖清单，判定商用/传染/义务/冲突，输出法务级报告。"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+dependencies = []
+
+[project.scripts]
+oss-license-checker = "oss_license_checker.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["oss_license_checker*"]
