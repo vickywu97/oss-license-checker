@@ -1,5 +1,7 @@
 # oss-license-checker
 
+[![CI](https://github.com/vickywu97/oss-license-checker/actions/workflows/ci.yml/badge.svg)](https://github.com/vickywu97/oss-license-checker/actions/workflows/ci.yml)
+
 **离线开源许可证合规判定工具** —— 输入依赖清单，自动解析每个依赖的 license，判定商用可行性、GPL/AGPL 传染路径、需履行的义务、冲突组合，输出一份法务和工程都能看懂的合规报告。
 
 > 一句话定位：律师和工程师之间的「许可证翻译器」。大多数律师不看依赖树，大多数工程师不懂许可证法；这个工具把两端的判断能力合在一起，离线、零依赖、可复现。
