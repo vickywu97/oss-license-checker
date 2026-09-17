@@ -1,6 +1,8 @@
 # oss-license-checker
 
 [![CI](https://github.com/vickywu97/oss-license-checker/actions/workflows/ci.yml/badge.svg)](https://github.com/vickywu97/oss-license-checker/actions/workflows/ci.yml)
+[![Python 3.8+](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 **离线开源许可证合规判定工具** —— 输入依赖清单，自动解析每个依赖的 license，判定商用可行性、GPL/AGPL 传染路径、需履行的义务、冲突组合，输出一份法务和工程都能看懂的合规报告。
 
@@ -37,6 +39,12 @@ python -m oss_license_checker --format json demo/sample_package.json demo/sample
 
 # 查看内置 license 事实库
 python -m oss_license_checker --list-licenses
+
+# 导出 CycloneDX 1.5 SBOM（用于 EO 14028 / 欧盟 CRA 流水线）
+python -m oss_license_checker --format cyclonedx demo/sample_package.json -o sbom.json
+
+# CI 门禁：存在高风险依赖时以非零码退出
+python -m oss_license_checker --fail-on high demo/sample_package.json
 ```
 
 ## 运行测试
@@ -92,6 +100,18 @@ python -m unittest discover -s tests -v
 
 本工具输出为自动化初筛结果，**不构成法律意见**。license 事实与兼容性以官方文本为准（本库以 SPDX 官方列表 + FSF 兼容性清单为来源，附核验日期）。最终合规判断请咨询执业律师。
 
+## 作品集关系
+
+| 项目 | 合规领域 | 判定性质 |
+|------|----------|----------|
+| [privacy-policy-checker](https://github.com/vickywu97/privacy-policy-checker) | 数据 / 隐私法务 | 半硬规则（检查项） |
+| [token-classifier](https://github.com/vickywu97/token-classifier) | Web3 / 加密法务 | 软规则（Howey 四要素） |
+| **oss-license-checker** | 知产 / 开源法务 | 硬规则（兼容矩阵） |
+
+三者共同构成「法律 + 工程」完整作品集，均由律师 + 税务师 + 专利代理师 + 代码能力交集构建。
+
+---
+
 ## License
 
-MIT © 2026 Vicky Wu
+MIT © 2026 Vicky Wu (vickywu97)

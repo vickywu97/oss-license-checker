@@ -29,9 +29,12 @@ def main(argv=None):
     p.add_argument("files", nargs="*", help="依赖清单文件（package.json / requirements.txt / go.mod）")
     p.add_argument("--project-license", default="MIT", help="项目自身的 license（默认 MIT）")
     p.add_argument("--project-name", default="my-project", help="项目名（用于报告标题）")
-    p.add_argument("--format", choices=["md", "json"], default="md", help="输出格式（默认 md）")
+    p.add_argument("--format", choices=["md", "json", "cyclonedx"], default="md",
+                   help="输出格式：md（法务版）/ json（工程版）/ cyclonedx（SBOM，CycloneDX 1.5）")
     p.add_argument("--output", "-o", default=None, help="输出到文件（默认打印到 stdout）")
     p.add_argument("--list-licenses", action="store_true", help="列出内置 license 事实库")
+    p.add_argument("--fail-on", choices=["high", "medium", "low"], default=None,
+                   help="CI 门禁：若存在风险等级>=该级别的依赖，以非零码退出（high/medium/low）")
     args = p.parse_args(argv)
 
     if args.list_licenses:
@@ -52,6 +55,13 @@ def main(argv=None):
         print(f"报告已写入 {args.output}")
     else:
         print(out)
+
+    if args.fail_on:
+        order = {"low": 1, "medium": 2, "high": 3}
+        hits = [r for r in results if order.get(r["risk_level"], 0) >= order[args.fail_on]]
+        if hits:
+            print(f"❌ CI 门禁未通过：{len(hits)} 个依赖风险等级达到或超过 --fail-on={args.fail_on}", file=sys.stderr)
+            return 1
     return 0
 
 

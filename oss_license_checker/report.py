@@ -1,6 +1,8 @@
-"""报告生成：Markdown（法务版）与 JSON（工程版）。"""
+"""报告生成：Markdown（法务版）与 JSON（工程版）与 CycloneDX SBOM。"""
 import json
-from datetime import date
+from datetime import date, datetime, timezone
+
+from .engine import normalize_license
 
 _DISCLAIMER = (
     "本报告由自动化合规检查工具生成，仅供初步筛查参考，"
@@ -91,8 +93,47 @@ def render_json(results, project_name="my-project", project_license="MIT"):
     }
 
 
+def render_cyclonedx(results, project_name="my-project", project_license="MIT"):
+    """生成 CycloneDX 1.5 SBOM（JSON），使 SBOM 合规（EO 14028 / EU CRA）宣称可落地。"""
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    proj_spdx = normalize_license(project_license) or "NOASSERTION"
+    components = []
+    for r in results:
+        comp = {
+            "type": "library",
+            "name": r["package"],
+            "version": r["version"],
+            "licenses": [{"license": {"id": r["spdx_id"]}}] if r["spdx_id"] else [],
+            "properties": [
+                {"name": "vickywu:risk_level", "value": r["risk_level"]},
+                {"name": "vickywu:compatibility", "value": r["compatibility"]},
+                {"name": "vickywu:commercial_use", "value": str(r["commercial_use"])},
+                {"name": "vickywu:copyleft_scope", "value": str(r["copyleft_scope"])},
+            ],
+        }
+        components.append(comp)
+    bom = {
+        "bomFormat": "CycloneDX",
+        "specVersion": "1.5",
+        "version": 1,
+        "metadata": {
+            "timestamp": ts,
+            "component": {
+                "type": "application",
+                "name": project_name,
+                "version": "0.0.0",
+                "licenses": [{"license": {"id": proj_spdx}}],
+            },
+        },
+        "components": components,
+    }
+    return json.dumps(bom, ensure_ascii=False, indent=2)
+
+
 def render(results, project_name="my-project", project_license="MIT", fmt="md"):
     if fmt == "json":
         return json.dumps(render_json(results, project_name, project_license),
                           ensure_ascii=False, indent=2)
+    if fmt == "cyclonedx":
+        return render_cyclonedx(results, project_name, project_license)
     return render_markdown(results, project_name, project_license)

@@ -9,6 +9,8 @@ description = "离线开源许可证合规判定工具：解析依赖清单，�
 readme = "README.md"
 requires-python = ">=3.8"
 license = { text = "MIT" }
+authors = [{ name = "Vicky Wu", email = "vickywu97@163.com" }]
+keywords = ["legal-tech", "open-source", "license", "compliance", "sbom", "gpl", "copyleft", "mit"]
 dependencies = []
 
 [project.scripts]
