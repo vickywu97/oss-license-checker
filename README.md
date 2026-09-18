@@ -74,9 +74,9 @@ python -m unittest discover -s tests -v
 
 ---
 
-## license 真实来源解析（覆盖率 50% → 95%+）
+## license 真实来源解析（三级解析：本地元数据 → 映射表 → unknown）
 
-依赖的 license 不再只查「包名 → license」映射表（仅覆盖 138 个主流包），而是**优先读取已安装依赖自带的元数据**，覆盖率可到 95%+（实测见下方「真实项目实测」）：
+依赖的 license 不再只查「包名 → license」映射表（仅覆盖 138 个主流包），而是**优先读取已安装依赖自带的元数据**。实测覆盖率：npm 生态 98–100%，Python/PyPI 71–75%（分生态明细见下方「真实项目实测」）：
 
 | 优先级 | 来源 | 读取方式 | 可信度 |
 |--------|------|----------|--------|
@@ -96,17 +96,39 @@ python -m unittest discover -s tests -v
 
 ### 真实项目实测（可复现）
 
-选用两个真实开源项目，覆盖「现代生态」与「老牌 / 遗留生态」两种情形，直接跑 [`scripts/measure_real_coverage.py`](scripts/measure_real_coverage.py)（复用本工具的三级解析）：
+#### 覆盖率：多生态对照
 
-| 项目 | 生态 | 唯一依赖 | 本地元数据 | 内置映射表 | 未知 | 覆盖率 |
-|------|------|---------|-----------|-----------|------|--------|
-| [express](https://github.com/expressjs/express) | 现代 npm | 66 | 66 | 0 | 0 | **100.0%** |
-| [bower](https://github.com/bower/bower)（已废弃） | 老牌 npm | 263 | 258 | 0 | 5 | **98.1%** |
+直接跑 [`scripts/measure_real_coverage.py`](scripts/measure_real_coverage.py)（复用本工具的三级解析），真实安装真实项目：
 
-**落 unknown 的包（bower，5 个，原因一致：`package.json` 无 `license` 字段）**：
-`beaker@1.0.0` · `buffers@0.1.1` · `garply@`（无版本号）· `requireg@0.1.7` · `retry@0.6.1` —— 均为 2017 年前后的老包，发布时未声明 license，需人工读其 LICENSE 文件确认。
+| 生态 / 项目 | 唯一依赖 | 本地元数据 | 内置映射表 | 未知 | 覆盖率 |
+|-------------|---------|-----------|-----------|------|--------|
+| npm 现代 · [express](https://github.com/expressjs/express) | 66 | 66 | 0 | 0 | **100.0%** |
+| npm 现代 · `request` | 47 | 47 | 0 | 0 | **100.0%** |
+| npm 遗留 · [bower](https://github.com/bower/bower)（已废弃） | 263 | 258 | 0 | 5 | **98.1%** |
+| npm 遗留 · `gulp@3.9.1` | 224 | 224 | 0 | 0 | **100.0%** |
+| **Python · `flask`** | 7 | 3 | 2 | 2 | **71.4%** |
+| **Python · `pandas`** | 4 | 2 | 1 | 1 | **75.0%** |
+| Python · `requests` | 5 | 2 | 3 | 0 | **100.0%** |
 
-> 结论：现代 npm 包普遍在 `package.json` 自带 SPDX `license` 字段，覆盖率接近 100%；老牌 / 遗留生态的部分包不声明 license，会落 unknown。工具对落 unknown 的包**绝不猜测**，明确标注「需人工核实」——这是合规上的诚实取舍，而非缺陷。映射表兜底 + 手动确认即可闭合缺口。更极端的「映射表命中 + unknown 混合」情形由 [`demo/with_local_metadata/`](demo/with_local_metadata/) 单独演示（覆盖率 80%）。
+**落 unknown 的包——按原因分类**（unknown 桶不掩盖，逐个说明为什么）：
+
+| 项目 | 包 | 原因 |
+|------|-----|------|
+| bower | `beaker@1.0.0` · `buffers@0.1.1` · `garply@` · `requireg@0.1.7` · `retry@0.6.1` | `package.json` **无 license 字段**（2017 年前后的老包，发布时未声明） |
+| flask | `Werkzeug@3.1.8` · `MarkupSafe@3.0.3` | **只给了 `License-File` 指针**，指向的 LICENSE 是 BSD 变体，正文无法区分 2-Clause / 3-Clause → 不猜 |
+| pandas | `python-dateutil@2.9.0.post0` | `License` 字段写作 **`"Dual License"`**，无法归一化为具体 SPDX → 不猜 |
+
+一个诚实的观察：**npm 生态自 2014 年起 license 字段就已高度规范**，连 2015 年代的 `gulp@3` / `browserify@10` 实测也在 95% 以上；真正拉低覆盖率的是 **Python/PyPI**——元数据声明方式不统一（`License:` / `Classifier:` / `License-File:` 三种并存，且常有 `UNKNOWN` 或 `"Dual License"` 这类含糊写法）。
+
+#### 为什么覆盖率不是核心
+
+覆盖率只是**入场券**——FOSSA / Snyk 也能把依赖列出来、也能读 license 字段。真正只有本工具在做的是**判定层**：
+
+- **兼容性判定**：依赖 license vs 项目 license 的四态判定（兼容 / 单向 / 有条件 / 不兼容），含 SPDX 表达式的 `AND` / `OR` / `WITH` 解析与 OR 择优（双许可按最宽松方案评估）
+- **法律级义务清单**：署名、公开源码、提供安装说明、附许可全文等**具体义务**，而不是一句"GPL 有传染性"
+- **传染路径分析**：GPL/AGPL 究竟从哪个**传递依赖**进来（见下节）——这是最容易被忽略、后果最严重的一类风险
+
+> **「不猜」是刻意的取舍**：含糊写法（纯 `BSD`、`"Dual License"`、`License-File` 指向无法识别的文件）一律标 `unknown` **并写明原因**，而不是输出一个可能错误的 SPDX id。在合规场景里，一个错误的判定比一句「需人工核实」危险得多。
 
 ### 传递依赖分析（GPL / AGPL 传染路径）
 
