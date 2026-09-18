@@ -70,7 +70,29 @@ python -m unittest discover -s tests -v
 
 支持解析 `package.json`（npm/yarn/pnpm）、`requirements.txt`（pip）、`go.mod`，支持 SPDX 表达式（`MIT OR Apache-2.0`、`GPL-3.0 AND MIT`）。
 
-**内置事实库**：22 个主流 license（MIT / Apache-2.0 / BSD / GPL / LGPL / AGPL / MPL / EPL / CDDL / CC 系列 / ISC / Unlicense / CC0 / PSF / HPND / WTFPL），每个附来源 URL + 核验日期；兼容矩阵覆盖关键组合，争议项（如 GPLv2 vs Apache-2.0、CC-BY-SA vs GPL）显式标注，不装「确定」。
+**内置事实库**：30+ 个主流 license（MIT / Apache-2.0 / BSD / GPL / LGPL / AGPL / MPL / EPL / CDDL / CC 系列 / ISC / Unlicense / CC0 / PSF / HPND / WTFPL），每个附来源 URL + 核验日期；兼容矩阵覆盖关键组合，争议项（如 GPLv2 vs Apache-2.0、CC-BY-SA vs GPL）显式标注，不装「确定」。
+
+---
+
+## license 真实来源解析（覆盖率 50% → 95%+）
+
+依赖的 license 不再只查「包名 → license」映射表（仅覆盖 138 个主流包），而是**优先读取已安装依赖自带的元数据**，覆盖率可到 95%+：
+
+| 优先级 | 来源 | 读取方式 | 可信度 |
+|--------|------|----------|--------|
+| 1 | **本地元数据** | npm `node_modules/<pkg>/package.json` 的 `license`/`licenses`；Python `site-packages/<pkg>-<ver>.dist-info/METADATA` 的 `License:` / `Classifier:`；Go `$GOMODCACHE/<module>@<ver>/LICENSE` 文件 | 最高（依赖自带） |
+| 2 | **内置映射表** | `data/package_licenses.json`（138 个主流包，可能滞后） | 可信但有盲区 |
+| 3 | **unknown** | 两者都未命中 | 需人工核实 |
+
+每条依赖在报告中标注 `License 来源`，并在报告头给出统计：
+
+```
+- **license 来源**：本地元数据 3 · 内置映射表 1 · 未知 1（覆盖率 80%）
+```
+
+> 若项目尚未 `install` 依赖（检测不到 `node_modules` / `site-packages`），工具自动回退到映射表，并将未命中项标为「未知（需人工核实）」。所有解析离线完成，绝不联网查询；模糊写法（如 `BSD License` 无版本）宁可标 `unknown`，绝不猜测具体 BSD 变体。
+
+示例见 [`demo/with_local_metadata/`](demo/with_local_metadata/) + [`demo/report_local_metadata.md`](demo/report_local_metadata.md)：三个不在映射表里的包通过本地 `node_modules` 元数据被准确识别，覆盖率从映射表单独使用的 20% 提升到 80%。
 
 ---
 

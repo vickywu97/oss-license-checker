@@ -1,0 +1,11 @@
+{
+  "name": "demo-with-local-metadata",
+  "version": "1.0.0",
+  "dependencies": {
+    "lodash": "^4.17.21",
+    "acme-unique-util-a": "1.0.0",
+    "acme-unique-util-b": "2.3.0",
+    "acme-unique-util-c": "0.9.0",
+    "totally-unknown-pkg": "1.0.0"
+  }
+}

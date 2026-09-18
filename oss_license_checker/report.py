@@ -11,6 +11,12 @@ _DISCLAIMER = (
 
 _RISK_LABEL = {"high": "🔴 高风险", "medium": "🟡 中风险", "low": "🟢 低风险"}
 
+_SOURCE_LABEL = {
+    "local_metadata": "本地元数据（已安装依赖）",
+    "mapping_table": "内置映射表",
+    "unknown": "未知（需人工核实）",
+}
+
 _COPYLEFT_LABEL = {
     "none": "无传染",
     "weak": "弱传染（库级）",
@@ -27,6 +33,17 @@ def _risk_summary(results):
     return s
 
 
+def _source_summary(results):
+    s = {"local_metadata": 0, "mapping_table": 0, "unknown": 0}
+    for r in results:
+        key = r.get("license_source", "unknown")
+        s[key] = s.get(key, 0) + 1
+    total = len(results)
+    covered = s["local_metadata"] + s["mapping_table"]
+    coverage = round(covered / total * 100) if total else 0
+    return s, coverage
+
+
 def _fmt_obligations(obligations):
     if not obligations:
         return "无"
@@ -35,6 +52,7 @@ def _fmt_obligations(obligations):
 
 def render_markdown(results, project_name="my-project", project_license="MIT"):
     summary = _risk_summary(results)
+    src_summary, coverage = _source_summary(results)
     total = len(results)
     lines = []
     lines.append("# 开源许可证合规报告")
@@ -46,6 +64,11 @@ def render_markdown(results, project_name="my-project", project_license="MIT"):
     lines.append(
         f"- **风险统计**：🔴 高风险 {summary['high']} · "
         f"🟡 中风险 {summary['medium']} · 🟢 低风险 {summary['low']}"
+    )
+    lines.append(
+        f"- **license 来源**：本地元数据 {src_summary['local_metadata']} · "
+        f"内置映射表 {src_summary['mapping_table']} · 未知 {src_summary['unknown']}"
+        f"（覆盖率 {coverage}%）"
     )
     lines.append("")
 
@@ -62,6 +85,7 @@ def render_markdown(results, project_name="my-project", project_license="MIT"):
             lines.append("")
             lines.append(f"- **License**：{r['license']}"
                          + (f"（{r['spdx_id']}）" if r["spdx_id"] else ""))
+            lines.append(f"- **License 来源**：{_SOURCE_LABEL.get(r.get('license_source'), r.get('license_source'))}")
             if r["commercial_use"] is False:
                 lines.append("- **商用**：❌ 禁止商业使用")
             if r["modification"] is False:
@@ -82,12 +106,15 @@ def render_markdown(results, project_name="my-project", project_license="MIT"):
 
 def render_json(results, project_name="my-project", project_license="MIT"):
     summary = _risk_summary(results)
+    src_summary, coverage = _source_summary(results)
     return {
         "project": project_name,
         "project_license": project_license,
         "scanned_at": date.today().isoformat(),
         "total_dependencies": len(results),
         "risk_summary": summary,
+        "license_source_summary": src_summary,
+        "coverage_pct": coverage,
         "dependencies": results,
         "disclaimer": _DISCLAIMER,
     }
@@ -109,6 +136,7 @@ def render_cyclonedx(results, project_name="my-project", project_license="MIT"):
                 {"name": "vickywu:compatibility", "value": r["compatibility"]},
                 {"name": "vickywu:commercial_use", "value": str(r["commercial_use"])},
                 {"name": "vickywu:copyleft_scope", "value": str(r["copyleft_scope"])},
+                {"name": "vickywu:license_source", "value": r.get("license_source", "unknown")},
             ],
         }
         components.append(comp)

@@ -4,10 +4,12 @@
 所有结论均为自动化初筛，不构成法律意见（见 report.py 的免责声明）。
 """
 import json
+import os
 import re
 from pathlib import Path
 
 from .parsers import detect
+from .license_resolver import resolve_license
 
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -313,8 +315,14 @@ def _recommendations(spdx_known, facts, risk, rel, op="single"):
     return recs
 
 
-def analyze(deps, project_license="MIT", licenses=None, compat=None, pkg_map=None):
-    """对依赖清单做合规判定，返回结果列表（按风险从高到低排序）。"""
+def analyze(deps, project_license="MIT", licenses=None, compat=None, pkg_map=None,
+            project_root=None, ecosystem_map=None):
+    """对依赖清单做合规判定，返回结果列表（按风险从高到低排序）。
+
+    ``project_root`` 与 ``ecosystem_map`` 用于真实依赖检测：若提供，则优先
+    读取已安装依赖自带的 license 元数据（见 license_resolver）；否则仅依赖
+    内置映射表（与旧行为一致，旧测试无需改动）。
+    """
     licenses = licenses or load_licenses()
     compat = compat or load_compatibility()
     pkg_map = pkg_map or load_package_map()
@@ -324,8 +332,9 @@ def analyze(deps, project_license="MIT", licenses=None, compat=None, pkg_map=Non
     results = []
 
     for name, ver in deps.items():
-        raw = pkg_map.get(name.lower())
-        expr = parse_expression(raw)
+        eco = ecosystem_map.get(name) if ecosystem_map else None
+        raw, source = resolve_license(name, ver, eco, project_root, pkg_map)
+        expr = parse_expression(raw) if raw else parse_expression(None)
         spdx_ids = expr["spdx_ids"]
         spdx_known = bool(spdx_ids)
         tree = expr["tree"]
@@ -369,6 +378,7 @@ def analyze(deps, project_license="MIT", licenses=None, compat=None, pkg_map=Non
             "source_disclosure_required": facts["source_disclosure"] if facts else None,
             "patent_grant": facts["patent_grant"] if facts else None,
             "obligations": facts["obligations"] if facts else [],
+            "license_source": source,
             "risk_level": risk,
             "compatibility": rel,
             "recommendations": _recommendations(spdx_known, facts, risk, rel, expr["op"]),
@@ -379,14 +389,48 @@ def analyze(deps, project_license="MIT", licenses=None, compat=None, pkg_map=Non
     return results
 
 
-def scan(manifest_paths, project_license="MIT"):
-    """解析多个清单文件（自动识别格式），合并去重后做判定。"""
+def _ecosystem_for(path):
+    """按清单文件名推断生态（用于定位本地已安装依赖的元数据）。"""
+    name = str(path).lower()
+    if name.endswith("package.json"):
+        return "npm"
+    if name.endswith("go.mod"):
+        return "go"
+    if name.endswith("requirements.txt") or name.endswith(".txt"):
+        return "python"
+    return None
+
+
+def _common_parent(paths):
+    if not paths:
+        return None
+    common = os.path.abspath(paths[0])
+    for p in paths[1:]:
+        # 逐层上溯求公共祖先
+        while not p.startswith(common + os.sep) and common != os.path.dirname(common):
+            common = os.path.dirname(common)
+    return common if os.path.isdir(common) else os.path.dirname(common)
+
+
+def scan(manifest_paths, project_license="MIT", project_root=None):
+    """解析多个清单文件（自动识别格式），合并去重后做判定。
+
+    同时记录每个依赖所属生态，并将 ``project_root``（默认取清单文件公共父目录）
+    传入判定引擎，以便优先读取已安装依赖的真实 license 元数据。
+    """
     deps = {}
+    ecosystem_map = {}
+    roots = []
     for p in manifest_paths:
         parser = detect(p)
         if parser is None:
             continue
+        eco = _ecosystem_for(p)
         for name, ver in parser(p).items():
             # 同名依赖保留（后出现的覆盖版本）；不影响 license 判定
             deps[name] = ver
-    return analyze(deps, project_license=project_license)
+            ecosystem_map[name] = eco
+        roots.append(os.path.dirname(os.path.abspath(p)))
+    root = project_root or _common_parent(roots) or os.getcwd()
+    return analyze(deps, project_license=project_license,
+                  project_root=root, ecosystem_map=ecosystem_map)
