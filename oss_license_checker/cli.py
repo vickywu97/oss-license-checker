@@ -8,7 +8,7 @@
 import argparse
 import sys
 
-from .engine import load_licenses, scan
+from .engine import load_licenses, scan, scan_with_graph
 from .report import render
 
 
@@ -33,6 +33,8 @@ def main(argv=None):
                    help="输出格式：md（法务版）/ json（工程版）/ cyclonedx（SBOM，CycloneDX 1.5）")
     p.add_argument("--output", "-o", default=None, help="输出到文件（默认打印到 stdout）")
     p.add_argument("--list-licenses", action="store_true", help="列出内置 license 事实库")
+    p.add_argument("--transitive", action="store_true",
+                   help="启用传递依赖分析：构建依赖图，区分直接/传递依赖并高亮 GPL/AGPL 传染路径")
     p.add_argument("--fail-on", choices=["high", "medium", "low"], default=None,
                    help="CI 门禁：若存在风险等级>=该级别的依赖，以非零码退出（high/medium/low）")
     args = p.parse_args(argv)
@@ -45,9 +47,16 @@ def main(argv=None):
         p.print_help()
         return 2
 
-    results = scan(args.files, project_license=args.project_license)
+    transitive_info = None
+    if args.transitive:
+        results, transitive_info = scan_with_graph(
+            args.files, project_license=args.project_license,
+            project_name=args.project_name)
+    else:
+        results = scan(args.files, project_license=args.project_license)
     out = render(results, project_name=args.project_name,
-                 project_license=args.project_license, fmt=args.format)
+                 project_license=args.project_license, fmt=args.format,
+                 transitive=transitive_info)
 
     if args.output:
         with open(args.output, "w", encoding="utf-8") as f:
@@ -59,6 +68,10 @@ def main(argv=None):
     if args.fail_on:
         order = {"low": 1, "medium": 2, "high": 3}
         hits = [r for r in results if order.get(r["risk_level"], 0) >= order[args.fail_on]]
+        # 传递依赖的强传染（GPL/AGPL）视同 high：这类风险最易被遗漏
+        hits += [r for r in results
+                 if r.get("infection_path") and order["high"] >= order[args.fail_on]
+                 and r not in hits]
         if hits:
             print(f"❌ CI 门禁未通过：{len(hits)} 个依赖风险等级达到或超过 --fail-on={args.fail_on}", file=sys.stderr)
             return 1

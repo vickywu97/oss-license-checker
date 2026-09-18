@@ -44,13 +44,58 @@ def _source_summary(results):
     return s, coverage
 
 
+def _render_transitive(lines, info):
+    """「传递依赖传染分析」章节：直接/传递统计 + 强/弱传染清单 + 传染路径。"""
+    lines.append("## 传递依赖传染分析")
+    lines.append("")
+    lines.append(
+        f"- **直接依赖**：{info.get('direct_count', 0)} · "
+        f"**传递依赖**：{info.get('transitive_count', 0)} · "
+        f"**总唯一依赖**：{info.get('total', 0)}"
+    )
+    lines.append("")
+
+    strong = info.get("strong", [])
+    lines.append(f"### 🔴 强传染依赖（GPL / AGPL）· {len(strong)} 个")
+    lines.append("")
+    if not strong:
+        lines.append("未检测到 GPL / AGPL 强传染依赖。")
+        lines.append("")
+    for s in strong:
+        kind = "直接依赖" if s["is_direct"] else f"传递依赖（第 {s['depth']} 层）"
+        lines.append(f"**`{s['name']}@{s['version']}`** — {s['license']} · {kind}")
+        lines.append("")
+        lines.append("```")
+        for i, step in enumerate(s["path"]):
+            prefix = ("    " * i) + ("└─ " if i else "")
+            suffix = "  ⚠️ 传染终点" if i == len(s["path"]) - 1 else ""
+            lines.append(f"{prefix}{step}{suffix}")
+        lines.append("```")
+        lines.append("")
+
+    weak = info.get("weak", [])
+    if weak:
+        lines.append(f"### 🟡 弱传染依赖（LGPL / MPL / EPL / CDDL）· {len(weak)} 个")
+        lines.append("")
+        for w in weak:
+            kind = "直接依赖" if w["is_direct"] else f"传递依赖（第 {w['depth']} 层）"
+            lines.append(f"- `{w['name']}@{w['version']}` — {w['license']} · {kind}")
+        lines.append("")
+
+    for warn in info.get("warnings", []):
+        lines.append(f"> ⚠️ {warn}")
+    if info.get("warnings"):
+        lines.append("")
+
+
 def _fmt_obligations(obligations):
     if not obligations:
         return "无"
     return "；".join(obligations)
 
 
-def render_markdown(results, project_name="my-project", project_license="MIT"):
+def render_markdown(results, project_name="my-project", project_license="MIT",
+                    transitive=None):
     summary = _risk_summary(results)
     src_summary, coverage = _source_summary(results)
     total = len(results)
@@ -71,6 +116,9 @@ def render_markdown(results, project_name="my-project", project_license="MIT"):
         f"（覆盖率 {coverage}%）"
     )
     lines.append("")
+
+    if transitive:
+        _render_transitive(lines, transitive)
 
     for level, title in (("high", "高风险依赖（需立即处理）"),
                          ("medium", "中风险依赖（需评估）"),
@@ -104,10 +152,11 @@ def render_markdown(results, project_name="my-project", project_license="MIT"):
     return "\n".join(lines)
 
 
-def render_json(results, project_name="my-project", project_license="MIT"):
+def render_json(results, project_name="my-project", project_license="MIT",
+                transitive=None):
     summary = _risk_summary(results)
     src_summary, coverage = _source_summary(results)
-    return {
+    payload = {
         "project": project_name,
         "project_license": project_license,
         "scanned_at": date.today().isoformat(),
@@ -118,6 +167,9 @@ def render_json(results, project_name="my-project", project_license="MIT"):
         "dependencies": results,
         "disclaimer": _DISCLAIMER,
     }
+    if transitive:
+        payload["transitive_analysis"] = transitive
+    return payload
 
 
 def render_cyclonedx(results, project_name="my-project", project_license="MIT"):
@@ -137,8 +189,13 @@ def render_cyclonedx(results, project_name="my-project", project_license="MIT"):
                 {"name": "vickywu:commercial_use", "value": str(r["commercial_use"])},
                 {"name": "vickywu:copyleft_scope", "value": str(r["copyleft_scope"])},
                 {"name": "vickywu:license_source", "value": r.get("license_source", "unknown")},
+                {"name": "vickywu:is_transitive", "value": str(r.get("is_transitive", False))},
             ],
         }
+        if r.get("infection_path"):
+            comp["properties"].append(
+                {"name": "vickywu:infection_path", "value": " -> ".join(r["infection_path"])}
+            )
         components.append(comp)
     bom = {
         "bomFormat": "CycloneDX",
@@ -158,10 +215,13 @@ def render_cyclonedx(results, project_name="my-project", project_license="MIT"):
     return json.dumps(bom, ensure_ascii=False, indent=2)
 
 
-def render(results, project_name="my-project", project_license="MIT", fmt="md"):
+def render(results, project_name="my-project", project_license="MIT", fmt="md",
+           transitive=None):
     if fmt == "json":
-        return json.dumps(render_json(results, project_name, project_license),
+        return json.dumps(render_json(results, project_name, project_license,
+                                      transitive=transitive),
                           ensure_ascii=False, indent=2)
     if fmt == "cyclonedx":
         return render_cyclonedx(results, project_name, project_license)
-    return render_markdown(results, project_name, project_license)
+    return render_markdown(results, project_name, project_license,
+                           transitive=transitive)

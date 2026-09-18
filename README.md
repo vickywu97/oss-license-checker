@@ -108,6 +108,34 @@ python -m unittest discover -s tests -v
 
 > 结论：现代 npm 包普遍在 `package.json` 自带 SPDX `license` 字段，覆盖率接近 100%；老牌 / 遗留生态的部分包不声明 license，会落 unknown。工具对落 unknown 的包**绝不猜测**，明确标注「需人工核实」——这是合规上的诚实取舍，而非缺陷。映射表兜底 + 手动确认即可闭合缺口。更极端的「映射表命中 + unknown 混合」情形由 [`demo/with_local_metadata/`](demo/with_local_metadata/) 单独演示（覆盖率 80%）。
 
+### 传递依赖分析（GPL / AGPL 传染路径）
+
+只看直接依赖会漏掉真正的风险：GPL/AGPL 常常藏在**传递依赖**里。开启 `--transitive` 后，工具读取 lock 文件构建完整依赖图，区分直接与传递依赖，并对强传染依赖计算**从项目根出发的最短传染路径**：
+
+```
+gpl-transitive-demo (MIT)
+    └─ acme-video-tool@1.0.0 (MIT)
+        └─ ffmpeg-static@5.3.0 (GPL-3.0-or-later)  ⚠️ 传染终点
+```
+
+- **生态支持**：npm（`package-lock.json` v1/v2/v3，含 `optionalDependencies` 与 `file:` 链接包）、Python（`site-packages` METADATA 的 `Requires-Dist`，不依赖 pipdeptree）、Go（`vendor/modules.txt` / `go.mod` + `go.sum`）
+- **风险优先级**：传递依赖的 GPL/AGPL 排在直接依赖之前——这类风险最易被忽略
+- **优雅降级**：无 lock 文件时只分析直接依赖并在报告中说明原因；Go 模块图本身不提供边信息，明确标注「传递依赖未分析」而不是假装算得出
+- **安全约束**：BFS 带 visited 集合 + 20 层深度上限，依赖环不会导致无限递归
+- **CI 门禁**：`--transitive --fail-on high` 会把强传染传递依赖视同 high 并以非零码退出
+
+真实项目实测（依赖图基于 lock 文件）：
+
+| 项目 | 总唯一依赖 | 直接 | 传递 | 发现 |
+|------|-----------|------|------|------|
+| express | 68 | 1 | 67 | 无 copyleft（全部宽松许可） |
+| sharp | 32 | 1 | 31 | **LGPL-3.0-or-later** 传递依赖（第 2 层；平台二进制包挂在 `optionalDependencies` 下，忽略它会漏判） |
+| 经本地包间接引入 ffmpeg-static | 21 | 1 | 20 | **GPL-3.0-or-later** 传递依赖（第 2 层），与 MIT 项目 `incompatible` → 🔴 高风险 |
+
+> 说明两处诚实细节：① 上表是「只装了这一个包」的最小项目，所以直接依赖=1；② npm 包 `mysql` 实测**不含**任何 GPL 依赖，故改用 `ffmpeg-static` 作为强传染样本。
+
+demo 见 [`demo/with_gpl_transitive/`](demo/with_gpl_transitive/) + [`demo/report_transitive_gpl.md`](demo/report_transitive_gpl.md)。
+
 ---
 
 ## 为什么是这个人来做

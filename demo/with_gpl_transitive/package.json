@@ -1,0 +1,8 @@
+{
+  "name": "gpl-transitive-demo",
+  "version": "1.0.0",
+  "license": "MIT",
+  "dependencies": {
+    "acme-video-tool": "^1.0.0"
+  }
+}

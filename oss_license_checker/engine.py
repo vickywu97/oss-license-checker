@@ -6,10 +6,12 @@
 import json
 import os
 import re
+import sys
 from pathlib import Path
 
 from .parsers import detect
 from .license_resolver import resolve_license
+from .depgraph import analyze_transitive, build_graph
 
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -315,8 +317,90 @@ def _recommendations(spdx_known, facts, risk, rel, op="single"):
     return recs
 
 
+def _find_python_sites(project_root, include_global=True):
+    """定位项目内可用的 site-packages（venv / Lib / 当前解释器）。
+
+    ``include_global=False`` 时只认项目本地的 site-packages——用于**生态判定**：
+    否则任何项目都会因为解释器自带 site-packages 而被误判成 Python 项目。
+    """
+    sites = []
+    root = project_root
+    for _ in range(3):
+        for cand in (os.path.join(root, "site-packages"),
+                     os.path.join(root, "Lib", "site-packages")):
+            if os.path.isdir(cand):
+                sites.append(cand)
+        try:
+            for entry in os.listdir(root):
+                lib = os.path.join(root, entry, "lib")
+                if not os.path.isdir(lib):
+                    continue
+                for ver in os.listdir(lib):
+                    sp = os.path.join(lib, ver, "site-packages")
+                    if os.path.isdir(sp):
+                        sites.append(sp)
+        except OSError:
+            pass
+        parent = os.path.dirname(root)
+        if parent == root:
+            break
+        root = parent
+    if include_global:
+        sites.extend(s for s in sys.path if s.endswith("site-packages"))
+    return list(dict.fromkeys(sites))
+
+
+def _detect_graph_ecosystem(project_root):
+    if os.path.isfile(os.path.join(project_root, "package-lock.json")):
+        return "npm"
+    if (os.path.isfile(os.path.join(project_root, "go.mod"))
+            or os.path.isdir(os.path.join(project_root, "vendor"))):
+        return "go"
+    if _find_python_sites(project_root, include_global=False):
+        return "python"
+    return None
+
+
+def resolve_graph(project_root, project_name="my-project", python_direct=None,
+                  pkg_map=None):
+    """构建依赖图 → ``(marks, transitive_info, graph_deps)``。
+
+    ``marks`` 以包名索引：``{"is_transitive": bool, "depth": int,
+    "infection_path": [...]}``（仅强传染传递依赖带路径）。
+    ``graph_deps`` 是图里出现的全部依赖 ``{name: version}``，用于把传递依赖
+    也纳入逐依赖判定（开启 ``--transitive`` 时）。
+    """
+    pkg_map = pkg_map or load_package_map()
+    eco = _detect_graph_ecosystem(project_root)
+    if eco is None:
+        return {}, {"total": 0, "direct_count": 0, "transitive_count": 0,
+                    "strong": [], "weak": [],
+                    "warnings": ["未识别到依赖图来源（无 package-lock.json / "
+                                 "go.mod / site-packages），已降级为仅分析直接依赖"]}, {}
+
+    def lookup(name, version):
+        raw, _src = resolve_license(name, version, eco, project_root, pkg_map)
+        return raw
+
+    nodes, warns = build_graph(
+        project_root, eco, license_lookup=lookup,
+        python_sites=(_find_python_sites(project_root) if eco == "python" else None),
+        python_direct=python_direct,
+    )
+    info = analyze_transitive(nodes, project_name=project_name, warnings=warns)
+    marks = {}
+    graph_deps = {}
+    for node in nodes.values():
+        marks[node.name] = {"is_transitive": not node.is_direct, "depth": node.depth}
+        if node.name not in graph_deps or node.version:
+            graph_deps[node.name] = node.version
+    for s in info["strong"]:
+        marks.setdefault(s["name"], {})["infection_path"] = s["path"]
+    return marks, info, graph_deps
+
+
 def analyze(deps, project_license="MIT", licenses=None, compat=None, pkg_map=None,
-            project_root=None, ecosystem_map=None):
+            project_root=None, ecosystem_map=None, graph_marks=None):
     """对依赖清单做合规判定，返回结果列表（按风险从高到低排序）。
 
     ``project_root`` 与 ``ecosystem_map`` 用于真实依赖检测：若提供，则优先
@@ -363,6 +447,19 @@ def analyze(deps, project_license="MIT", licenses=None, compat=None, pkg_map=Non
             rel = _agg_rel(rels)
 
         risk = _risk_level(chosen_ids, facts, rel, spdx_known)
+        mark = (graph_marks or {}).get(name, {})
+        is_transitive = bool(mark.get("is_transitive", False))
+        strong_transitive = (is_transitive and facts
+                             and facts["copyleft_scope"] in ("strong", "network"))
+
+        recs = _recommendations(spdx_known, facts, risk, rel, expr["op"])
+        if strong_transitive:
+            # 传递依赖的强传染最易被忽略：即使与项目 license 判定为兼容，
+            # 也要显式提示沿依赖链复核传染范围。
+            recs.append(
+                f"⚠️ 传递依赖（第 {mark.get('depth', '?')} 层）含强传染许可："
+                "请沿依赖链复核传染范围，必要时以独立进程/服务隔离"
+            )
         results.append({
             "package": name,
             "version": ver,
@@ -381,11 +478,19 @@ def analyze(deps, project_license="MIT", licenses=None, compat=None, pkg_map=Non
             "license_source": source,
             "risk_level": risk,
             "compatibility": rel,
-            "recommendations": _recommendations(spdx_known, facts, risk, rel, expr["op"]),
+            "is_transitive": is_transitive,
+            "depth": mark.get("depth", 0),
+            "infection_path": mark.get("infection_path"),
+            "recommendations": recs,
         })
 
     order = {"high": 0, "medium": 1, "low": 2}
-    results.sort(key=lambda r: order.get(r["risk_level"], 9))
+    # 同风险级别内，传递依赖的强传染排在直接依赖之前（更易被忽略）
+    results.sort(key=lambda r: (
+        order.get(r["risk_level"], 9),
+        0 if (r.get("is_transitive") and r.get("infection_path")) else 1,
+        r["package"],
+    ))
     return results
 
 
@@ -412,11 +517,13 @@ def _common_parent(paths):
     return common if os.path.isdir(common) else os.path.dirname(common)
 
 
-def scan(manifest_paths, project_license="MIT", project_root=None):
+def scan(manifest_paths, project_license="MIT", project_root=None,
+         graph_marks=None):
     """解析多个清单文件（自动识别格式），合并去重后做判定。
 
     同时记录每个依赖所属生态，并将 ``project_root``（默认取清单文件公共父目录）
     传入判定引擎，以便优先读取已安装依赖的真实 license 元数据。
+    ``graph_marks`` 来自 :func:`resolve_graph`，用于标注直接/传递依赖与传染路径。
     """
     deps = {}
     ecosystem_map = {}
@@ -433,4 +540,39 @@ def scan(manifest_paths, project_license="MIT", project_root=None):
         roots.append(os.path.dirname(os.path.abspath(p)))
     root = project_root or _common_parent(roots) or os.getcwd()
     return analyze(deps, project_license=project_license,
-                  project_root=root, ecosystem_map=ecosystem_map)
+                  project_root=root, ecosystem_map=ecosystem_map,
+                  graph_marks=graph_marks)
+
+
+def scan_with_graph(manifest_paths, project_license="MIT", project_root=None,
+                    project_name="my-project", python_direct=None):
+    """在 :func:`scan` 之上构建依赖图，返回 ``(results, transitive_info)``。
+
+    依赖图缺失（如未 npm install）时优雅降级：仅分析直接依赖，并在
+    ``transitive_info["warnings"]`` 中说明原因。
+    """
+    roots = []
+    deps = {}
+    ecosystem_map = {}
+    for p in manifest_paths:
+        parser = detect(p)
+        if parser is None:
+            continue
+        eco = _ecosystem_for(p)
+        for name, ver in parser(p).items():
+            deps[name] = ver
+            ecosystem_map[name] = eco
+        roots.append(os.path.dirname(os.path.abspath(p)))
+    root = project_root or _common_parent(roots) or os.getcwd()
+    marks, info, graph_deps = resolve_graph(root, project_name=project_name,
+                                            python_direct=python_direct)
+    # 传递依赖也纳入逐依赖判定：图里的包补充进 deps（清单里的直接依赖优先保留）
+    eco = _detect_graph_ecosystem(root)
+    for name, ver in graph_deps.items():
+        if name not in deps:
+            deps[name] = ver
+            ecosystem_map.setdefault(name, eco)
+    results = analyze(deps, project_license=project_license,
+                      project_root=root, ecosystem_map=ecosystem_map,
+                      graph_marks=marks)
+    return results, info
