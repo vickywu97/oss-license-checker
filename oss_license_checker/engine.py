@@ -22,14 +22,18 @@ _ALIASES = {
     "unlicense": "Unlicense",
     "cc0-1.0": "CC0-1.0", "cc0": "CC0-1.0",
     "gpl-2.0-only": "GPL-2.0-only", "gpl-2.0": "GPL-2.0-only", "gpl-2": "GPL-2.0-only",
-    "gpl-2.0-or-later": "GPL-2.0-only", "gpl-2.0+": "GPL-2.0-only",
+    "gpl-2.0-or-later": "GPL-2.0-or-later", "gpl-2.0+": "GPL-2.0-or-later",
     "gpl-3.0-only": "GPL-3.0-only", "gpl-3.0": "GPL-3.0-only", "gpl-3": "GPL-3.0-only",
-    "gpl-3.0-or-later": "GPL-3.0-only", "gpl-3.0+": "GPL-3.0-only",
+    "gpl-3.0-or-later": "GPL-3.0-or-later", "gpl-3.0+": "GPL-3.0-or-later",
     "gpl": "GPL-3.0-only",
     "agpl-3.0-only": "AGPL-3.0-only", "agpl-3.0": "AGPL-3.0-only", "agpl-3": "AGPL-3.0-only",
+    "agpl-3.0-or-later": "AGPL-3.0-or-later", "agpl-3.0+": "AGPL-3.0-or-later",
     "agpl": "AGPL-3.0-only",
     "lgpl-2.1-only": "LGPL-2.1-only", "lgpl-2.1": "LGPL-2.1-only",
-    "lgpl-3.0-only": "LGPL-3.0-only", "lgpl-3.0": "LGPL-3.0-only", "lgpl": "LGPL-3.0-only",
+    "lgpl-2.1-or-later": "LGPL-2.1-or-later", "lgpl-2.1+": "LGPL-2.1-or-later",
+    "lgpl-3.0-only": "LGPL-3.0-only", "lgpl-3.0": "LGPL-3.0-only",
+    "lgpl-3.0-or-later": "LGPL-3.0-or-later", "lgpl-3.0+": "LGPL-3.0-or-later",
+    "lgpl": "LGPL-3.0-only",
     "mpl-2.0": "MPL-2.0", "mpl-2": "MPL-2.0", "mpl": "MPL-2.0",
     "epl-2.0": "EPL-2.0", "epl-2": "EPL-2.0", "epl": "EPL-2.0",
     "cddl-1.0": "CDDL-1.0", "cddl-1": "CDDL-1.0", "cddl": "CDDL-1.0",
@@ -41,6 +45,9 @@ _ALIASES = {
     "psf-2.0": "PSF-2.0", "python-2.0": "PSF-2.0",
     "hpnd": "HPND",
 }
+
+# SPDX 表达式解析占位符：临时遮蔽 -or-later，避免被 OR 运算符切割
+_ORLATER_PH = "\x01OL\x01"
 
 
 def _normalize_key(s):
@@ -60,6 +67,154 @@ def normalize_license(license_str):
     if not license_str:
         return None
     return _ALIASES.get(_normalize_key(license_str))
+
+
+# ---------------------------------------------------------------------------
+# SPDX 表达式解析（递归下降）：支持 AND / OR / WITH / 括号分组。
+# ---------------------------------------------------------------------------
+_TOK_RE = re.compile(r"\s*(\(|\)|AND|OR|WITH|[^\s()]+)\s*", re.I)
+
+
+def _tokenize(work):
+    return [m.group(1) for m in _TOK_RE.finditer(work)]
+
+
+def _parse_or(toks, i):
+    node, i = _parse_and(toks, i)
+    nodes = [node]
+    while i < len(toks) and toks[i].upper() == "OR":
+        i += 1
+        n, i = _parse_and(toks, i)
+        nodes.append(n)
+    if len(nodes) == 1:
+        return nodes[0], i
+    return ("OR", nodes), i
+
+
+def _parse_and(toks, i):
+    node, i = _parse_atom(toks, i)
+    nodes = [node]
+    while i < len(toks) and toks[i].upper() == "AND":
+        i += 1
+        n, i = _parse_atom(toks, i)
+        nodes.append(n)
+    if len(nodes) == 1:
+        return nodes[0], i
+    return ("AND", nodes), i
+
+
+def _parse_atom(toks, i):
+    if i >= len(toks):
+        return None, i
+    t = toks[i]
+    if t == "(":
+        node, i = _parse_or(toks, i + 1)
+        if i < len(toks) and toks[i] == ")":
+            i += 1
+        return node, i
+    lic = t
+    i += 1
+    exc = None
+    if i < len(toks) and toks[i].upper() == "WITH":
+        i += 1
+        if i < len(toks):
+            exc = toks[i]
+            i += 1
+    return ("LIC", lic, exc), i
+
+
+def _iter_leaves(tree):
+    if tree is None:
+        return
+    if isinstance(tree, tuple):
+        tag = tree[0]
+        if tag == "LIC":
+            yield tree
+        else:
+            for child in tree[1]:
+                yield from _iter_leaves(child)
+
+
+def _restore(tok):
+    return tok.replace(_ORLATER_PH, "-or-later")
+
+
+def parse_expression(expr):
+    """解析 SPDX 表达式，返回 dict{spdx_ids, op, raw, tree, exceptions}。
+
+    op ∈ {"single", "and", "or"}。OR 表示可任选其一（按最宽松理解），
+    AND 表示须同时满足（全部义务叠加）。支持括号分组与 WITH <例外>。
+    """
+    if not expr:
+        return {"spdx_ids": [], "op": "single", "raw": expr, "tree": None, "exceptions": []}
+    raw = " ".join(expr.strip().split())
+    # 遮蔽 -or-later，避免被 OR 运算符误切
+    work = raw.replace("-or-later", _ORLATER_PH).replace("-OR-LATER", _ORLATER_PH)
+    toks = _tokenize(work)
+    tree, _ = _parse_or(toks, 0)
+
+    flat = []
+    excs = set()
+    for leaf in _iter_leaves(tree):
+        lic = _restore(leaf[1])
+        sid = normalize_license(lic)
+        if sid:
+            flat.append(sid)
+        if leaf[2]:
+            excs.add(leaf[2])
+    op = tree[0].lower() if isinstance(tree, tuple) and tree[0] in ("AND", "OR") else "single"
+    return {
+        "spdx_ids": flat,
+        "op": op,
+        "raw": raw,
+        "tree": tree,
+        "exceptions": sorted(excs),
+    }
+
+
+def _flatten_options(tree):
+    """OR 展开为多条备选方案；AND / 叶子各自为一条方案。"""
+    if tree is None:
+        return []
+    if isinstance(tree, tuple) and tree[0] == "OR":
+        opts = []
+        for child in tree[1]:
+            opts.extend(_flatten_options(child))
+        return opts
+    return [tree]
+
+
+def _agg_rel(rels):
+    if not rels:
+        return "unknown"
+    if "incompatible" in rels:
+        return "incompatible"
+    if "disputed" in rels:
+        return "disputed"
+    if "conditional" in rels:
+        return "conditional"
+    if all(r == "unknown" for r in rels):
+        return "unknown"
+    return "compatible" if "compatible" in rels else rels[0]
+
+
+def _eval_option(opt_tree, proj_spdx, licenses, matrix):
+    leaves = list(_iter_leaves(opt_tree))
+    ids = [normalize_license(_restore(l[1])) for l in leaves]
+    ids = [i for i in ids if i]
+    facts = _aggregate_facts(ids, licenses)
+    rels = [matrix.get(sid, {}).get(proj_spdx, "unknown") for sid in ids]
+    return {"ids": ids, "facts": facts, "rel": _agg_rel(rels)}
+
+
+_RISK_RANK = {"low": 0, "medium": 1, "high": 2, "none": 0}
+_COMPAT_RANK = {"compatible": 0, "one-way": 1, "conditional": 2,
+                "disputed": 3, "incompatible": 4, "unknown": 5}
+
+
+def _option_score(rel, facts):
+    risk = _risk_level([], facts, rel, bool(facts))
+    return (_RISK_RANK.get(risk, 1), _COMPAT_RANK.get(rel, 5))
 
 
 def _load_jsonl(path):
@@ -89,27 +244,6 @@ def load_compatibility():
 
 def load_package_map():
     return _load_json(DATA_DIR / "package_licenses.json").get("packages", {})
-
-
-def parse_expression(expr):
-    """解析 license 表达式，返回 dict{spdx_ids, op, raw}。
-
-    op ∈ {"single", "or", "and"}。OR 表示可任选其一（按最宽松理解），
-    AND 表示须同时满足（全部义务叠加）。
-    """
-    if not expr:
-        return {"spdx_ids": [], "op": "single", "raw": expr}
-    raw = expr.strip()
-    if re.search(r"\bAND\b", raw, re.I):
-        parts = re.split(r"\bAND\b", raw, flags=re.I)
-        ids = [normalize_license(p) for p in parts]
-        return {"spdx_ids": [i for i in ids if i], "op": "and", "raw": raw}
-    if re.search(r"\bOR\b", raw, re.I):
-        parts = re.split(r"\bOR\b", raw, flags=re.I)
-        ids = [normalize_license(p) for p in parts]
-        return {"spdx_ids": [i for i in ids if i], "op": "or", "raw": raw}
-    sid = normalize_license(raw)
-    return {"spdx_ids": [sid] if sid else [], "op": "single", "raw": raw}
 
 
 def _aggregate_facts(spdx_ids, licenses):
@@ -160,7 +294,7 @@ def _risk_level(spdx_ids, facts, rel, spdx_known):
     return "low"
 
 
-def _recommendations(spdx_known, facts, risk, rel):
+def _recommendations(spdx_known, facts, risk, rel, op="single"):
     recs = []
     if not spdx_known or facts is None:
         recs.append("license 无法自动识别，需人工核实该包的 LICENSE 文件")
@@ -174,6 +308,8 @@ def _recommendations(spdx_known, facts, risk, rel):
         recs.append("与项目 license 的兼容性未收录，建议人工确认")
     elif rel == "one-way":
         recs.append("单向兼容：可并入，但反向不可，注意保持许可边界")
+    elif op == "or":
+        recs.append("双许可（OR）：可择最宽松条款使用，已按最宽松方案评估")
     return recs
 
 
@@ -192,33 +328,40 @@ def analyze(deps, project_license="MIT", licenses=None, compat=None, pkg_map=Non
         expr = parse_expression(raw)
         spdx_ids = expr["spdx_ids"]
         spdx_known = bool(spdx_ids)
-        facts = _aggregate_facts(spdx_ids, licenses)
+        tree = expr["tree"]
 
-        # 与项目 license 的兼容关系（取第一个识别出的 spdx 判定；AND 时保守取最不利）
-        rel = "unknown"
-        if spdx_ids and proj_spdx:
-            rels = []
-            for sid in spdx_ids:
-                r = matrix.get(sid, {}).get(proj_spdx, "unknown")
-                rels.append(r)
-            if "incompatible" in rels:
-                rel = "incompatible"
-            elif "disputed" in rels:
-                rel = "disputed"
-            elif "conditional" in rels:
-                rel = "conditional"
-            elif all(r == "unknown" for r in rels):
-                rel = "unknown"
-            else:
-                rel = "compatible" if "compatible" in rels else rels[0]
+        # 与项目 license 的兼容关系
+        if expr["op"] == "or" and tree:
+            opts = _flatten_options(tree)
+            scored = []
+            for o in opts:
+                ev = _eval_option(o, proj_spdx, licenses, matrix)
+                ev["score"] = _option_score(ev["rel"], ev["facts"])
+                scored.append(ev)
+            best = min(scored, key=lambda e: e["score"])
+            rel = best["rel"]
+            facts = best["facts"]
+            chosen_ids = best["ids"]
+        elif expr["op"] == "and" and tree:
+            ev = _eval_option(tree, proj_spdx, licenses, matrix)
+            rel = ev["rel"]
+            facts = ev["facts"]
+            chosen_ids = ev["ids"]
+        else:
+            facts = _aggregate_facts(spdx_ids, licenses)
+            chosen_ids = spdx_ids
+            rels = [matrix.get(sid, {}).get(proj_spdx, "unknown") for sid in spdx_ids] if (spdx_ids and proj_spdx) else []
+            rel = _agg_rel(rels)
 
-        risk = _risk_level(spdx_ids, facts, rel, spdx_known)
+        risk = _risk_level(chosen_ids, facts, rel, spdx_known)
         results.append({
             "package": name,
             "version": ver,
             "license": raw if raw else "unknown",
-            "spdx_id": spdx_ids[0] if spdx_ids else None,
+            "spdx_id": chosen_ids[0] if chosen_ids else None,
             "license_expression": expr["op"],
+            "chosen_license": (chosen_ids[0] if len(chosen_ids) == 1 else None),
+            "exceptions": expr["exceptions"],
             "commercial_use": facts["commercial_use"] if facts else None,
             "modification": facts["modification"] if facts else None,
             "copyleft_scope": facts["copyleft_scope"] if facts else None,
@@ -228,7 +371,7 @@ def analyze(deps, project_license="MIT", licenses=None, compat=None, pkg_map=Non
             "obligations": facts["obligations"] if facts else [],
             "risk_level": risk,
             "compatibility": rel,
-            "recommendations": _recommendations(spdx_known, facts, risk, rel),
+            "recommendations": _recommendations(spdx_known, facts, risk, rel, expr["op"]),
         })
 
     order = {"high": 0, "medium": 1, "low": 2}

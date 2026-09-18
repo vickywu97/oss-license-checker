@@ -129,5 +129,47 @@ class FactIntegrityTest(unittest.TestCase):
         self.assertFalse(results[0]["commercial_use"])
 
 
+class ExpressionAccuracyRegressionTest(unittest.TestCase):
+    """回归：SPDX 表达式解析的若干历史误判。"""
+
+    def test_or_later_not_misparsed_as_or_operator(self):
+        # 历史 bug：-or-later 中的 'or' 被当成 OR 运算符切分
+        r = parse_expression("GPL-2.0-or-later")
+        self.assertEqual(r["op"], "single")
+        self.assertEqual(r["spdx_ids"], ["GPL-2.0-or-later"])
+        self.assertNotEqual(r["op"], "or")
+
+    def test_or_later_variants_resolve(self):
+        for raw in ("GPL-3.0-or-later", "LGPL-2.1-or-later",
+                    "LGPL-3.0-or-later", "AGPL-3.0-or-later", "GPL-3.0+"):
+            with self.subTest(raw=raw):
+                self.assertIsNotNone(normalize_license(raw), raw)
+
+    def test_grouped_expression_preserves_all_options(self):
+        # 历史 bug：(A OR B) AND C 静默丢弃 A、B
+        r = parse_expression("(MIT OR Apache-2.0) AND GPL-2.0")
+        self.assertEqual(r["op"], "and")
+        self.assertIn("MIT", r["spdx_ids"])
+        self.assertIn("Apache-2.0", r["spdx_ids"])
+        self.assertIn("GPL-2.0-only", r["spdx_ids"])
+
+    def test_with_exception_recognized(self):
+        r = parse_expression("Apache-2.0 WITH LLVM-exception")
+        self.assertEqual(r["op"], "single")
+        self.assertEqual(r["spdx_ids"], ["Apache-2.0"])
+        self.assertEqual(r["exceptions"], ["LLVM-exception"])
+
+    def test_dual_or_license_picks_most_permissive(self):
+        # 历史 bug：双许可 OR 取最不利条款（MIT OR GPL-3.0 → high），
+        # 正确应允许用户择最宽松条款（MIT）→ compatible/low
+        pkg_map = {"dual": "MIT OR GPL-3.0-only"}
+        res = analyze({"dual": "1.0"}, project_license="MIT", pkg_map=pkg_map)
+        x = res[0]
+        self.assertEqual(x["license_expression"], "or")
+        self.assertEqual(x["compatibility"], "compatible")
+        self.assertEqual(x["risk_level"], "low")
+        self.assertEqual(x["chosen_license"], "MIT")
+
+
 if __name__ == "__main__":
     unittest.main()
