@@ -1,16 +1,53 @@
-"""measure_real_coverage.classify_unknown_reason 的回归测试。
+"""measure_real_coverage 的 unknown 原因分类回归测试。
 
-该函数负责在「落 unknown」时反推真实原因（无字段 / UNKNOWN /
-SEE LICENSE 等），是 README 诚实叙事的数据来源。
+npm / Python 两类的原因反推，是 README 诚实叙事的数据来源：
+不掩盖 unknown 桶，而是说明每个 unknown 到底是为什么。
 """
 import os
 import sys
+import tempfile
 import unittest
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO_ROOT)
 
-from scripts.measure_real_coverage import classify_unknown_reason  # noqa: E402
+from scripts.measure_real_coverage import (  # noqa: E402
+    classify_python_unknown_reason,
+    classify_unknown_reason,
+)
+
+
+def _write_metadata(tmp, text, name="METADATA"):
+    path = os.path.join(tmp, name)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+    return path
+
+
+class PythonUnknownReasonTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+
+    def test_license_unknown(self):
+        meta = _write_metadata(self.tmp, "Name: x\nVersion: 1\nLicense: UNKNOWN\n")
+        self.assertIn("UNKNOWN", classify_python_unknown_reason(meta))
+
+    def test_license_file_only(self):
+        """flask / Werkzeug 的真实情形：只给 License-File 指针，无 SPDX 字段。"""
+        meta = _write_metadata(self.tmp,
+                               "Name: werkzeug\nVersion: 3.1.8\n"
+                               "License-File: LICENSE.txt\n")
+        self.assertIn("License-File", classify_python_unknown_reason(meta))
+
+    def test_classifier_only(self):
+        meta = _write_metadata(self.tmp,
+                               "Name: y\nVersion: 1\n"
+                               "Classifier: License :: OSI Approved :: BSD License\n")
+        self.assertIn("Classifier", classify_python_unknown_reason(meta))
+
+    def test_no_license_declaration(self):
+        meta = _write_metadata(self.tmp, "Name: z\nVersion: 1\nSummary: hi\n")
+        self.assertIn("无任何 license 声明", classify_python_unknown_reason(meta))
 
 
 class ClassifyUnknownReasonTest(unittest.TestCase):
