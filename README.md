@@ -96,12 +96,17 @@ python -m unittest discover -s tests -v
 
 ### 真实项目实测（可复现）
 
-选用真实开源项目 [`express`](https://github.com/expressjs/express) 的依赖树（安装后 66 个唯一依赖）运行本工具，结果：
+选用两个真实开源项目，覆盖「现代生态」与「老牌 / 遗留生态」两种情形，直接跑 [`scripts/measure_real_coverage.py`](scripts/measure_real_coverage.py)（复用本工具的三级解析）：
 
-- **license 来源**：本地元数据 66 · 内置映射表 0 · 未知 0
-- **覆盖率：100.0%（66/66 自动识别）**
+| 项目 | 生态 | 唯一依赖 | 本地元数据 | 内置映射表 | 未知 | 覆盖率 |
+|------|------|---------|-----------|-----------|------|--------|
+| [express](https://github.com/expressjs/express) | 现代 npm | 66 | 66 | 0 | 0 | **100.0%** |
+| [bower](https://github.com/bower/bower)（已废弃） | 老牌 npm | 263 | 258 | 0 | 5 | **98.1%** |
 
-> 现代 npm 包普遍在 `package.json` 自带 SPDX `license` 字段，因此「本地元数据」一级即可覆盖全部依赖；映射表兜底与 unknown 桶由上方 `demo/with_local_metadata/` 单独演示（覆盖率 80%，含未安装 / 未收录 SPDX 的包）。复现步骤见 [`scripts/measure_real_coverage.py`](scripts/measure_real_coverage.py)。
+**落 unknown 的包（bower，5 个，原因一致：`package.json` 无 `license` 字段）**：
+`beaker@1.0.0` · `buffers@0.1.1` · `garply@`（无版本号）· `requireg@0.1.7` · `retry@0.6.1` —— 均为 2017 年前后的老包，发布时未声明 license，需人工读其 LICENSE 文件确认。
+
+> 结论：现代 npm 包普遍在 `package.json` 自带 SPDX `license` 字段，覆盖率接近 100%；老牌 / 遗留生态的部分包不声明 license，会落 unknown。工具对落 unknown 的包**绝不猜测**，明确标注「需人工核实」——这是合规上的诚实取舍，而非缺陷。映射表兜底 + 手动确认即可闭合缺口。更极端的「映射表命中 + unknown 混合」情形由 [`demo/with_local_metadata/`](demo/with_local_metadata/) 单独演示（覆盖率 80%）。
 
 ---
 

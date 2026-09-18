@@ -18,7 +18,10 @@ import sys
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO_ROOT)
 
-from oss_license_checker.license_resolver import resolve_license  # noqa: E402
+from oss_license_checker.license_resolver import (  # noqa: E402
+    resolve_license,
+    normalize_license_string,
+)
 from oss_license_checker.engine import load_package_map  # noqa: E402
 
 
@@ -48,6 +51,37 @@ def walk_node_modules(root):
             project_root = os.path.dirname(dirpath)
             for name, pkg_path in iter_packages(dirpath):
                 yield name, pkg_path, project_root
+
+
+def classify_unknown_reason(meta):
+    """落 unknown 的真实原因（用于 README 诚实叙事）。
+
+    仅当 resolve_license 返回 source=="unknown" 时调用——即本地元数据读不到
+    可用 SPDX，且内置映射表也未收录。这里从 package.json 反推为什么读不到。
+    """
+    lic = meta.get("license")
+    lics = meta.get("licenses")
+    if lic is None and not lics:
+        return "无 license 字段（老包/内部包常见）"
+    if isinstance(lic, str):
+        low = lic.strip().lower()
+        if low == "unknown":
+            return "license 字段为 UNKNOWN"
+        if low == "unlicensed":
+            return "license 字段为 UNLICENSED（声明专有/未开源）"
+        if "see license" in low:
+            return "license 字段为 SEE LICENSE IN LICENSE（需读 LICENSE 文件）"
+        if normalize_license_string(lic) is None:
+            return f"license 字段存在但为含糊写法（{lic!r}），无法确定 SPDX"
+        return f"license 字段无法解析（{lic!r}）"
+    if isinstance(lic, dict):
+        t = lic.get("type")
+        if t and normalize_license_string(t) is None:
+            return f"license.type 含糊写法（{t!r}）"
+        return "license 字段为非标准对象且无可用 type"
+    if isinstance(lics, list):
+        return "licenses 数组为空或非标准"
+    return "无 license 字段"
 
 
 def main():
@@ -83,7 +117,7 @@ def main():
         )
         counts[source] += 1
         if source == "unknown":
-            unknowns.append(f"{name}@{version}")
+            unknowns.append((name, version, classify_unknown_reason(meta)))
 
     total = sum(counts.values())
     covered = counts["local_metadata"] + counts["mapping_table"]
@@ -96,8 +130,8 @@ def main():
     print(f"- 覆盖率：{pct:.1f}%（{covered}/{total} 自动识别）")
     if unknowns:
         print(f"\n## 落 unknown 的包（{len(unknowns)}）")
-        for u in sorted(unknowns):
-            print(f"- {u}")
+        for name, version, reason in sorted(unknowns, key=lambda x: x[0]):
+            print(f"- {name}@{version} — {reason}")
 
 
 if __name__ == "__main__":
