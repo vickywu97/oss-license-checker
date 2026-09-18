@@ -70,7 +70,7 @@ python -m unittest discover -s tests -v
 
 支持解析 `package.json`（npm/yarn/pnpm）、`requirements.txt`（pip）、`go.mod`，支持 SPDX 表达式（`MIT OR Apache-2.0`、`GPL-3.0 AND MIT`）。
 
-**内置事实库**：30+ 个主流 license（MIT / Apache-2.0 / BSD / GPL / LGPL / AGPL / MPL / EPL / CDDL / CC 系列 / ISC / Unlicense / CC0 / PSF / HPND / WTFPL），每个附来源 URL + 核验日期；兼容矩阵覆盖关键组合，争议项（如 GPLv2 vs Apache-2.0、CC-BY-SA vs GPL）显式标注，不装「确定」。
+**内置事实库**：27 个主流 license（MIT / Apache-2.0 / BSD / GPL / LGPL / AGPL / MPL / EPL / CDDL / CC 系列 / ISC / Unlicense / CC0 / PSF / HPND / WTFPL），每个附来源 URL + 核验日期；兼容矩阵覆盖关键组合，争议项（如 GPLv2 vs Apache-2.0、CC-BY-SA vs GPL）显式标注，不装「确定」。
 
 ---
 
