@@ -164,6 +164,18 @@ def _parse_python_metadata(meta_path):
             lic = line.split("::")[-1].strip()
             if lic:
                 return lic
+    # 兜底：License-File: 指向的文件（按 SPDX 关键字识别）
+    # 老包常在 License/Classifier 缺省时仅给出 License-File 指针
+    base = os.path.dirname(meta_path)
+    for line in text.splitlines():
+        if line.startswith("License-File:"):
+            rel = line[len("License-File:"):].strip()
+            if not rel:
+                continue
+            cand = os.path.normpath(os.path.join(base, rel))
+            spdx = _identify_spdx_from_license_file(cand)
+            if spdx:
+                return spdx
     return None
 
 

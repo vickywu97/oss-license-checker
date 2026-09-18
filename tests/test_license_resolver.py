@@ -82,6 +82,41 @@ class PythonMetadataTest(unittest.TestCase):
         self.assertEqual(read_local_metadata("demo-pkg-clf", "1.0.0", "python", tmp),
                          "Apache Software License")
 
+    def test_read_python_metadata_license_file(self):
+        # METADATA 无 License:/Classifier:，仅给 License-File: 指针 → 读文件识别
+        tmp = tempfile.mkdtemp()
+        sp = os.path.join(tmp, "site-packages")
+        os.makedirs(sp)
+        dist = os.path.join(sp, "demo-pkg-lf-1.0.0.dist-info")
+        os.makedirs(dist)
+        with open(os.path.join(dist, "METADATA"), "w", encoding="utf-8") as f:
+            f.write("Name: demo-pkg-lf\nVersion: 1.0.0\nLicense-File: LICENSE\n")
+        with open(os.path.join(dist, "LICENSE"), "w", encoding="utf-8") as f:
+            f.write("MIT License\n\nPermission is hereby granted, free of charge, "
+                    "to any person obtaining a copy of this software...\n")
+        from oss_license_checker.license_resolver import read_local_metadata
+        self.assertEqual(read_local_metadata("demo-pkg-lf", "1.0.0", "python", tmp), "MIT")
+
+    def test_read_python_metadata_license_file_unknown(self):
+        # License-File 指向无法识别的许可证文本 → 返回 None（走 unknown，不猜）
+        tmp = tempfile.mkdtemp()
+        sp = os.path.join(tmp, "site-packages")
+        os.makedirs(sp)
+        dist = os.path.join(sp, "demo-pkg-lu-1.0.0.dist-info")
+        os.makedirs(dist)
+        with open(os.path.join(dist, "METADATA"), "w", encoding="utf-8") as f:
+            f.write("Name: demo-pkg-lu\nVersion: 1.0.0\nLicense-File: COPYING\n")
+        with open(os.path.join(dist, "COPYING"), "w", encoding="utf-8") as f:
+            f.write("This software is provided as-is with no warranty whatsoever.\n")
+        from oss_license_checker.license_resolver import (
+            read_local_metadata,
+            resolve_license,
+        )
+        self.assertIsNone(read_local_metadata("demo-pkg-lu", "1.0.0", "python", tmp))
+        raw, src = resolve_license("demo-pkg-lu", "1.0.0", "python", tmp, {})
+        self.assertIsNone(raw)
+        self.assertEqual(src, "unknown")
+
 
 class GoMetadataTest(unittest.TestCase):
     def test_read_go_license_file(self):
