@@ -76,7 +76,7 @@ python -m unittest discover -s tests -v
 
 ## license 真实来源解析（覆盖率 50% → 95%+）
 
-依赖的 license 不再只查「包名 → license」映射表（仅覆盖 138 个主流包），而是**优先读取已安装依赖自带的元数据**，覆盖率可到 95%+：
+依赖的 license 不再只查「包名 → license」映射表（仅覆盖 138 个主流包），而是**优先读取已安装依赖自带的元数据**，覆盖率可到 95%+（实测见下方「真实项目实测」）：
 
 | 优先级 | 来源 | 读取方式 | 可信度 |
 |--------|------|----------|--------|
@@ -93,6 +93,15 @@ python -m unittest discover -s tests -v
 > 若项目尚未 `install` 依赖（检测不到 `node_modules` / `site-packages`），工具自动回退到映射表，并将未命中项标为「未知（需人工核实）」。所有解析离线完成，绝不联网查询；模糊写法（如 `BSD License` 无版本）宁可标 `unknown`，绝不猜测具体 BSD 变体。
 
 示例见 [`demo/with_local_metadata/`](demo/with_local_metadata/) + [`demo/report_local_metadata.md`](demo/report_local_metadata.md)：三个不在映射表里的包通过本地 `node_modules` 元数据被准确识别，覆盖率从映射表单独使用的 20% 提升到 80%。
+
+### 真实项目实测（可复现）
+
+选用真实开源项目 [`express`](https://github.com/expressjs/express) 的依赖树（安装后 66 个唯一依赖）运行本工具，结果：
+
+- **license 来源**：本地元数据 66 · 内置映射表 0 · 未知 0
+- **覆盖率：100.0%（66/66 自动识别）**
+
+> 现代 npm 包普遍在 `package.json` 自带 SPDX `license` 字段，因此「本地元数据」一级即可覆盖全部依赖；映射表兜底与 unknown 桶由上方 `demo/with_local_metadata/` 单独演示（覆盖率 80%，含未安装 / 未收录 SPDX 的包）。复现步骤见 [`scripts/measure_real_coverage.py`](scripts/measure_real_coverage.py)。
 
 ---
 
