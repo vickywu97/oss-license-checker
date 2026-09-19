@@ -79,8 +79,9 @@ class PythonMetadataTest(unittest.TestCase):
             f.write("Name: demo-pkg-clf\nVersion: 1.0.0\n"
                     "Classifier: License :: OSI Approved :: Apache Software License\n")
         from oss_license_checker.license_resolver import read_local_metadata
+        # 单个 OSI 分类器应映射为标准 SPDX（读声明，而非返回原始分类器名）
         self.assertEqual(read_local_metadata("demo-pkg-clf", "1.0.0", "python", tmp),
-                         "Apache Software License")
+                         "Apache-2.0")
 
     def test_read_python_metadata_license_file(self):
         # METADATA 无 License:/Classifier:，仅给 License-File: 指针 → 读文件识别
@@ -259,6 +260,71 @@ class LicenseExpressionTest(unittest.TestCase):
         from oss_license_checker.license_resolver import read_local_metadata
         self.assertEqual(
             read_local_metadata("demo-bsd2", "1.0.0", "python", tmp), "BSD-2-Clause")
+
+    def test_bsd4_clause_not_misidentified_as_bsd3(self):
+        # 含「广告条款」的 BSD-4-Clause 必须识别为 BSD-4-Clause，而非误判 BSD-3-Clause
+        # （4-Clause 有额外广告义务，错判为 3-Clause 会漏掉该义务）
+        bsd4 = ("Copyright 1990 X\n\nRedistribution and use in source and binary "
+                "forms, with or without modification, are permitted provided that "
+                "the following conditions are met:\n\n1. ...\n2. ...\n3. All "
+                "advertising materials mentioning features or use of this software "
+                "must display the following acknowledgement: This product includes "
+                "software developed by X.\n4. Neither the name of the copyright "
+                "holder nor the names of its contributors may be used to endorse "
+                "or promote products derived from this software without specific "
+                "prior written permission.\n")
+        tmp = tempfile.mkdtemp()
+        sp = os.path.join(tmp, "site-packages")
+        os.makedirs(sp)
+        dist = os.path.join(sp, "demo-bsd4-1.0.0.dist-info")
+        os.makedirs(dist)
+        with open(os.path.join(dist, "METADATA"), "w", encoding="utf-8") as f:
+            f.write("Name: demo-bsd4\nVersion: 1.0.0\nLicense-File: LICENSE.txt\n")
+        with open(os.path.join(dist, "LICENSE.txt"), "w", encoding="utf-8") as f:
+            f.write(bsd4)
+        from oss_license_checker.license_resolver import (
+            read_local_metadata, _identify_spdx_from_license_file)
+        lic_path = os.path.join(dist, "LICENSE.txt")
+        self.assertEqual(_identify_spdx_from_license_file(lic_path), "BSD-4-Clause")
+        self.assertEqual(
+            read_local_metadata("demo-bsd4", "1.0.0", "python", tmp), "BSD-4-Clause")
+
+    def test_python_classifier_dual_license_becomes_or(self):
+        # python-dateutil 模式：License: "Dual License" 含糊，但两条 Classifier
+        # 声明 BSD / Apache → 应识别为 OR 双许可，而非 unknown（能力缺口修复）
+        meta = ("Metadata-Version: 2.1\nName: demo-dual\nVersion: 1.0.0\n"
+                "License: Dual License\n"
+                "Classifier: License :: OSI Approved :: BSD License\n"
+                "Classifier: License :: OSI Approved :: Apache Software License\n"
+                "License-File: LICENSE\n")
+        tmp = tempfile.mkdtemp()
+        sp = os.path.join(tmp, "site-packages")
+        os.makedirs(sp)
+        dist = os.path.join(sp, "demo-dual-1.0.0.dist-info")
+        os.makedirs(dist)
+        with open(os.path.join(dist, "METADATA"), "w", encoding="utf-8") as f:
+            f.write(meta)
+        from oss_license_checker.license_resolver import read_local_metadata
+        raw = read_local_metadata("demo-dual", "1.0.0", "python", tmp)
+        self.assertIn("OR", raw)
+        self.assertIn("BSD-3-Clause", raw)
+        self.assertIn("Apache-2.0", raw)
+
+    def test_python_underscore_name_matches_distinfo(self):
+        # PEP 503：python_dateutil 的 dist-info 目录名用下划线，必须与
+        # python-dateutil 归一化后匹配（否则漏读元数据 → 错判 unknown）
+        tmp = tempfile.mkdtemp()
+        sp = os.path.join(tmp, "site-packages")
+        os.makedirs(sp)
+        dist = os.path.join(sp, "python_dateutil-2.9.0.post0.dist-info")
+        os.makedirs(dist)
+        with open(os.path.join(dist, "METADATA"), "w", encoding="utf-8") as f:
+            f.write("Metadata-Version: 2.1\nName: python-dateutil\nVersion: 2.9.0.post0\n"
+                    "License-Expression: BSD-3-Clause\n")
+        from oss_license_checker.license_resolver import read_local_metadata
+        self.assertEqual(
+            read_local_metadata("python-dateutil", "2.9.0.post0", "python", tmp),
+            "BSD-3-Clause")
 
 
 if __name__ == "__main__":

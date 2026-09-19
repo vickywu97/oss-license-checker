@@ -115,7 +115,8 @@ def _read_npm_metadata(name, project_root):
 
 
 def _read_python_metadata(name, project_root):
-    norm = name.replace("_", "-").lower()
+    # PEP 503 归一化：把 [-_.] 统一为单连字符，避免 python_dateutil 与 python-dateutil 不匹配
+    norm = re.sub(r"[-_.]+", "-", name).lower()
     candidates = set()
     root = project_root
     for _ in range(3):  # 项目本地 venv / site-packages（向上两级）
@@ -135,15 +136,36 @@ def _read_python_metadata(name, project_root):
         if not os.path.isdir(site):
             continue
         for entry in os.listdir(site):
-            el = entry.lower()
+            if not (entry.endswith(".dist-info") or entry.endswith(".egg-info")):
+                continue
+            el = re.sub(r"[-_.]+", "-", entry).lower()
             if not el.startswith(norm):
                 continue
-            if el.endswith(".dist-info") or el.endswith(".egg-info"):
-                meta = os.path.join(site, entry, "METADATA")
-                lic = _parse_python_metadata(meta)
-                if lic:
-                    return lic
+            meta = os.path.join(site, entry, "METADATA")
+            lic = _parse_python_metadata(meta)
+            if lic:
+                return lic
     return None
+
+
+# PyPI Classifier 名称 → SPDX（仅收录可高置信映射的 OSI 已批准许可）。
+# 这些分类器是包作者**显式声明**的许可，映射为标准 SPDX 属于「读声明」而非「猜」。
+_CLASSIFIER_SPDX = {
+    "MIT License": "MIT",
+    "BSD License": "BSD-3-Clause",   # PyPI 该分类器历史上即指 BSD 3-Clause
+    "Apache Software License": "Apache-2.0",
+    "ISC License": "ISC",
+    "Python Software Foundation License": "PSF-2.0",
+    "GNU General Public License v2 (GPLv2)": "GPL-2.0-only",
+    "GNU General Public License v3 (GPLv3)": "GPL-3.0-only",
+    "GNU General Public License v2 or later (GPLv2+)": "GPL-2.0-or-later",
+    "GNU General Public License v3 or later (GPLv3+)": "GPL-3.0-or-later",
+    "GNU Lesser General Public License v2 (LGPLv2)": "LGPL-2.1-only",
+    "GNU Lesser General Public License v3 (LGPLv3)": "LGPL-3.0-only",
+    "GNU Lesser General Public License v2 or later (LGPLv2+)": "LGPL-2.1-or-later",
+    "GNU Lesser General Public License v3 or later (LGPLv3+)": "LGPL-3.0-or-later",
+    "Mozilla Public License 2.0 (MPL 2.0)": "MPL-2.0",
+}
 
 
 def _parse_python_metadata(meta_path):
@@ -152,8 +174,9 @@ def _parse_python_metadata(meta_path):
             text = f.read()
     except OSError:
         return None
-    # 优先 License-Expression（PEP 639 标准 SPDX 表达式，如 BSD-3-Clause）
-    for line in text.splitlines():
+    lines = text.splitlines()
+    # 1. License-Expression（PEP 639 标准 SPDX 表达式，如 BSD-3-Clause）
+    for line in lines:
         if line.startswith("License-Expression:"):
             expr = line[len("License-Expression:"):].strip()
             if expr:
@@ -161,22 +184,32 @@ def _parse_python_metadata(meta_path):
                 if spdx:
                     return spdx
             # 含 OR/AND 的复合表达式不猜测，继续尝试其它字段
-    # 优先 License: 字段
-    for line in text.splitlines():
+    # 2. License: 仅当能归一化为具体 SPDX 才采用；含糊写法（如 "Dual License"）不采用，继续查 Classifier
+    for line in lines:
         if line.startswith("License:"):
             lic = line[len("License:"):].strip()
             if lic:
-                return lic
-    # 兜底：Classifier: License :: OSI Approved :: <Name>
-    for line in text.splitlines():
+                spdx = normalize_license_string(lic)
+                if spdx:
+                    return spdx
+            break
+    # 3. Classifier: License :: OSI Approved :: <Name>
+    #    多个条目即「双许可 / 多选一」（如 Apache OR BSD），如实表达为 OR，引擎按最宽松评估
+    spdx_ids = []
+    for line in lines:
         if line.startswith("Classifier:") and "License ::" in line:
-            lic = line.split("::")[-1].strip()
-            if lic:
-                return lic
-    # 兜底：License-File: 指向的文件（按 SPDX 关键字识别）
-    # 老包常在 License/Classifier 缺省时仅给出 License-File 指针
+            name = line.split("::")[-1].strip()
+            sid = _CLASSIFIER_SPDX.get(name)
+            if sid and sid not in spdx_ids:
+                spdx_ids.append(sid)
+    if len(spdx_ids) > 1:
+        return " OR ".join(spdx_ids)
+    if len(spdx_ids) == 1:
+        return spdx_ids[0]
+    # 4. License-File: 指向的文件（按 SPDX 关键字识别）
+    #    老包常在 License/Classifier 缺省时仅给出 License-File 指针
     base = os.path.dirname(meta_path)
-    for line in text.splitlines():
+    for line in lines:
         if line.startswith("License-File:"):
             rel = line[len("License-File:"):].strip()
             if not rel:
@@ -226,6 +259,11 @@ def _identify_spdx_from_license_file(path):
         return "LGPL-2.1-only"
     if "mozilla public license" in text and "2.0" in text:
         return "MPL-2.0"
+    # BSD-4-Clause：经典「广告条款」（第 3 条，All advertising materials ... must
+    # display ...）+ 第 4 条禁止背书条款，是 4-Clause 的决定性特征。必须在 3-Clause
+    # 判定之前，否则 4-Clause 会因含禁止背书条款被误判为 BSD-3-Clause（4-Clause 有额外广告义务）。
+    if "advertising" in text and ("endorse or promote products derived from this software" in text):
+        return "BSD-4-Clause"
     # BSD：3-Clause 与 2-Clause 的决定性区别在于「禁止背书条款」（第 3 条），
     # 该句在 LICENSE 正文中为高置信特征，识别它属于「读正文」而非「猜测」。
     if ("neither the name of the copyright holder" in text

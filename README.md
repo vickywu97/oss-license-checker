@@ -107,7 +107,7 @@ python -m unittest discover -s tests -v
 | npm 遗留 · [bower](https://github.com/bower/bower)（已废弃） | 263 | 258 | 0 | 5 | **98.1%** |
 | npm 遗留 · `gulp@3.9.1` | 224 | 224 | 0 | 0 | **100.0%** |
 | **Python · `flask`** | 7 | 7 | 0 | 0 | **100.0%** |
-| **Python · `pandas`** | 4 | 2 | 1 | 1 | **75.0%** |
+| **Python · `pandas`** | 4 | 3 | 1 | 0 | **100.0%** |
 | Python · `requests` | 5 | 4 | 1 | 0 | **100.0%** |
 
 **落 unknown 的包——按原因分类**（unknown 桶不掩盖，逐个说明为什么）：
@@ -115,11 +115,12 @@ python -m unittest discover -s tests -v
 | 项目 | 包 | 原因 |
 |------|-----|------|
 | bower | `beaker@1.0.0` · `buffers@0.1.1` · `garply@` · `requireg@0.1.7` · `retry@0.6.1` | `package.json` **无 license 字段**（2017 年前后的老包，发布时未声明） |
-| pandas | `python-dateutil@2.9.0.post0` | `License` 字段写作 **`"Dual License"`**（实为 Apache-2.0 OR BSD-3-Clause），SPDX 单一值无法表达「或」，且本工具不猜测 → 不猜 |
 
 > **关于 Werkzeug / MarkupSafe（诚实更正）**：早一版测得二者落 unknown，当时归因为「只给了 `License-File` 指针、BSD 变体正文无法区分 2/3-Clause」。复查真实文件后发现——二者 METADATA **明确声明 `License-Expression: BSD-3-Clause`**，且 LICENSE 正文含 3-Clause 的禁止背书条款。落 unknown 是**解析器的能力缺口**（漏读 `License-Expression` 字段、且对 BSD 正文一律拒识），并非「诚实的不猜」。已修复：新增 `License-Expression` 支持 + 从 LICENSE 正文识别 BSD 2/3-Clause 特征句，flask 覆盖率由 71.4% 升至 100%。这正说明「不猜」只应留给**真正含糊**的声明，不能把能力缺口包装成克制。
+>
+> **关于 `python-dateutil`（同一类能力缺口）**：早一版测得它落 unknown，归因为「`License: "Dual License"`，SPDX 单一值无法表达『或』」。复查 METADATA 后发现——它**同时声明了两条 `Classifier: License :: OSI Approved ::`（`BSD License` 与 `Apache Software License`）**，即作者明确给定「Apache-2.0 OR BSD-3-Clause」双许可。落 unknown 同样是**解析器的能力缺口**（漏读 `Classifier` 多分类器、不会把多分类器表达为 OR），并非「不猜」。已修复：新增 `Classifier` 双许可识别，多个 OSI 分类器如实表达为 `OR`，由引擎按最宽松方案评估，pandas 覆盖率由 75% 升至 100%。
 
-一个诚实的观察：**npm 生态自 2014 年起 license 字段就已高度规范**，连 2015 年代的 `gulp@3` / `browserify@10` 实测也在 95% 以上；**Python/PyPI** 的剩余覆盖率缺口主要来自两类——① 双许可/复合声明（`"Dual License"`、`Apache-2.0 OR BSD-3-Clause`）：SPDX 单一值无法表达「或」，本工具不猜测；② 极少数老包用含广告条款的 4-Clause 等罕见变体。凡是 `License-Expression` / `License:` / `Classifier:` 能明确判定的（含 LICENSE 正文含禁止背书条款的 BSD-3-Clause），解析器现已全部读取，不再假装读不出。
+一个诚实的观察：**npm 生态自 2014 年起 license 字段就已高度规范**，连 2015 年代的 `gulp@3` / `browserify@10` 实测也在 95% 以上；**Python/PyPI** 的剩余覆盖率缺口现已非常小——主要集中在：① 无任何机器可读 license 声明的极老包（如 bower 系）；② 声明为含糊 `BSD` 且无任何 `Classifier` 版本提示、LICENSE 正文也读不出 SPDX 的包。凡是 `License-Expression` / `License:` / `Classifier:` 能明确判定的（含 LICENSE 正文含禁止背书条款的 BSD-3-Clause、含广告条款的 BSD-4-Clause、多分类器表达的 OR 双许可），解析器现已全部读取，不再假装读不出。
 
 #### 为什么覆盖率不是核心
 
@@ -129,7 +130,7 @@ python -m unittest discover -s tests -v
 - **法律级义务清单**：署名、公开源码、提供安装说明、附许可全文等**具体义务**，而不是一句"GPL 有传染性"
 - **传染路径分析**：GPL/AGPL 究竟从哪个**传递依赖**进来（见下节）——这是最容易被忽略、后果最严重的一类风险
 
-> **「不猜」是刻意的取舍，但只留给真正含糊的声明**：纯 `BSD`（无版本）、`"Dual License"`（双许可）、含广告条款的 4-Clause、LICENSE 正文确实读不出 SPDX 的文件，一律标 `unknown` **并写明原因**。但凡是能明确判定的——METADATA 的 `License-Expression` / `License:` / `Classifier:` 声明、LICENSE 正文含禁止背书条款的 BSD-3-Clause——解析器会直接识别，**不会假装读不出**。对于 `"Dual License"` 这类双许可，报告会额外提示「可从宽选择、建议人工确认后取最宽松方案」，不影响判定的诚实性。在合规场景里，一个错误的判定比一句「需人工核实」危险得多；但把能力缺口包装成克制，同样会误导专业读者。
+> **「不猜」是刻意的取舍，但只留给真正含糊的声明**：纯 `BSD`（无版本、且无任何 `Classifier` 版本提示）、LICENSE 正文确实读不出 SPDX 的文件、完全没有 license 声明的包，一律标 `unknown` **并写明原因**。但凡是能明确判定的——METADATA 的 `License-Expression` / `License:` / `Classifier:` 声明、LICENSE 正文含禁止背书条款的 BSD-3-Clause、含广告条款的 BSD-4-Clause、多个 OSI 分类器表达的 OR 双许可——解析器会直接识别，**不会假装读不出**，也**不会把能力缺口包装成克制**。在合规场景里，一个错误的判定比一句「需人工核实」危险得多；但把能力缺口说成克制，同样会误导专业读者。
 
 ### 传递依赖分析（GPL / AGPL 传染路径）
 
