@@ -247,7 +247,10 @@ class RobustnessTest(unittest.TestCase):
         info = analyze_transitive(nodes, project_name="p")
         deepest = max(n.depth for n in nodes.values())
         self.assertLessEqual(deepest, MAX_DEPTH)
-        self.assertTrue(any("上限" in w for w in info["warnings"]))
+        # 深度上限告警须明确提示「可能有未分析的传递依赖」
+        self.assertTrue(
+            any("深度上限" in w and "未" in w for w in info["warnings"]),
+            info["warnings"])
 
     def test_lock_missing_degrades(self):
         nodes, warns = build_graph(self.tmp, "npm")

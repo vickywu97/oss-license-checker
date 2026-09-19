@@ -61,6 +61,20 @@ class TestFailOn(unittest.TestCase):
         finally:
             os.unlink(path)
 
+    def test_fail_on_transitive_gpl_permissive_project(self):
+        # MIT 项目 + 传递 GPL 依赖（ffmpeg-static）→ 视同 high，应 fail
+        demo = os.path.join(ROOT, "demo", "with_gpl_transitive", "package.json")
+        self.assertEqual(
+            cli.main(["--transitive", "--fail-on", "high", demo]), 1)
+
+    def test_fail_on_transitive_gpl_strong_project_passes(self):
+        # 项目自身即为强传染（GPL-3.0-only），其 GPL 传递依赖属合规，
+        # 不应误报 fail（宽松项目 + GPL 依赖才会 fail）
+        demo = os.path.join(ROOT, "demo", "with_gpl_transitive", "package.json")
+        self.assertEqual(
+            cli.main(["--transitive", "--fail-on", "high",
+                      "--project-license", "GPL-3.0-only", demo]), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

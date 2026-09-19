@@ -152,6 +152,15 @@ def _parse_python_metadata(meta_path):
             text = f.read()
     except OSError:
         return None
+    # 优先 License-Expression（PEP 639 标准 SPDX 表达式，如 BSD-3-Clause）
+    for line in text.splitlines():
+        if line.startswith("License-Expression:"):
+            expr = line[len("License-Expression:"):].strip()
+            if expr:
+                spdx = normalize_license_string(expr)
+                if spdx:
+                    return spdx
+            # 含 OR/AND 的复合表达式不猜测，继续尝试其它字段
     # 优先 License: 字段
     for line in text.splitlines():
         if line.startswith("License:"):
@@ -217,7 +226,19 @@ def _identify_spdx_from_license_file(path):
         return "LGPL-2.1-only"
     if "mozilla public license" in text and "2.0" in text:
         return "MPL-2.0"
-    # BSD 三变体难以仅凭正文区分 → 不猜
+    # BSD：3-Clause 与 2-Clause 的决定性区别在于「禁止背书条款」（第 3 条），
+    # 该句在 LICENSE 正文中为高置信特征，识别它属于「读正文」而非「猜测」。
+    if ("neither the name of the copyright holder" in text
+            or "names of its contributors may be used to endorse" in text
+            or "endorse or promote products derived from this software" in text):
+        return "BSD-3-Clause"
+    # BSD-2-Clause：含经典「redistribution and use」两条 + 免责声明，
+    # 且既无背书条款（排除 3-Clause）也无广告条款（排除 4-Clause）→ 可确定 2-Clause。
+    if ("redistribution and use in source and binary forms" in text
+            and "endorse or promote" not in text
+            and "advertising" not in text):
+        return "BSD-2-Clause"
+    # 其余含糊 BSD 写法（如纯 "BSD"、含广告条款的 4-Clause 等）→ 不猜
     return None
 
 

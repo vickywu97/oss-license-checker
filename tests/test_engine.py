@@ -11,6 +11,7 @@ from oss_license_checker.engine import (  # noqa: E402
     load_licenses,
     load_compatibility,
     load_package_map,
+    _recommendations,
 )
 
 
@@ -104,6 +105,27 @@ class AnalyzeTest(unittest.TestCase):
         results = analyze({"mystery-pkg": "1.0"}, project_license="MIT", pkg_map=pkg_map)
         self.assertIsNone(results[0]["spdx_id"])
         self.assertEqual(results[0]["risk_level"], "medium")
+
+    def test_dual_license_hint(self):
+        # 双许可声明（如 Apache-2.0 OR BSD-3-Clause）应给出「从宽选择」提示
+        recs = _recommendations(
+            False, None, "medium", "unknown", "single", "Dual License")
+        self.assertTrue(any("无法自动识别" in r for r in recs))
+        self.assertTrue(any("最宽松" in r for r in recs))
+        # 普通 unknown（无双许可特征）不应给该提示
+        plain = _recommendations(False, None, "medium", "unknown", "single", "FOO")
+        self.assertFalse(any("最宽松" in r for r in plain))
+
+    def test_strong_dep_into_strong_project_is_low(self):
+        # GPL 项目并入 GPL-or-later 依赖（one-way 可吸收）属合规，判低而非高
+        # 避免把「GPL 项目使用 GPL 依赖」误报成高风险
+        results = analyze({"ffmpeg-static": "5.3.0"},
+                         project_license="GPL-3.0-only",
+                         pkg_map={"ffmpeg-static": "GPL-3.0-or-later"})
+        r = results[0]
+        self.assertEqual(r["spdx_id"], "GPL-3.0-or-later")
+        self.assertEqual(r["compatibility"], "one-way")
+        self.assertEqual(r["risk_level"], "low")
 
 
 class FactIntegrityTest(unittest.TestCase):

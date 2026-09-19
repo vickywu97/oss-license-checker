@@ -93,16 +93,27 @@ def classify_python_unknown_reason(meta_path):
             text = f.read()
     except OSError:
         return "METADATA 不可读"
+    lic_expr = None
     lic = None
     classifier = None
     license_file = None
     for line in text.splitlines():
-        if line.startswith("License:") and lic is None:
+        if line.startswith("License-Expression:") and lic_expr is None:
+            lic_expr = line[len("License-Expression:"):].strip()
+        elif line.startswith("License:") and lic is None:
             lic = line[len("License:"):].strip()
         elif line.startswith("Classifier:") and "License ::" in line and classifier is None:
             classifier = line.split("::")[-1].strip()
         elif line.startswith("License-File:") and license_file is None:
             license_file = line[len("License-File:"):].strip()
+    if lic_expr:
+        low = lic_expr.lower()
+        if " or " in low or " and " in low:
+            return (f"License-Expression 为复合表达式 {lic_expr!r}，含 OR/AND，"
+                    f"本工具不猜测，建议人工确认后从最宽松条款选择")
+        if normalize_license_string(lic_expr) is None:
+            return f"License-Expression 为 {lic_expr!r}，无法归一化为单一 SPDX"
+        return f"License-Expression 已识别为 {normalize_license_string(lic_expr)!r}"
     if lic:
         if lic.strip().upper() == "UNKNOWN":
             return "License: UNKNOWN"

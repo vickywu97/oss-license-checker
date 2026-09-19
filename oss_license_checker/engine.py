@@ -287,7 +287,10 @@ def _risk_level(spdx_ids, facts, rel, spdx_known):
     if scope == "network":
         return "high"
     if scope == "strong":
-        return "low" if rel == "compatible" else "high"
+        # 强传染依赖：与项目兼容（compatible）或可单向并入（one-way，如
+        # GPL-3.0-or-later 并入 GPL-3.0-only）即合规，判低；仅 incompatible 判高。
+        # 否则会把「GPL 项目使用 GPL 依赖」这类正常合规场景误报为高风险。
+        return "low" if rel in ("compatible", "one-way") else "high"
     if scope in ("weak", "file"):
         return "medium"
     # permissive / none
@@ -298,10 +301,15 @@ def _risk_level(spdx_ids, facts, rel, spdx_known):
     return "low"
 
 
-def _recommendations(spdx_known, facts, risk, rel, op="single"):
+def _recommendations(spdx_known, facts, risk, rel, op="single", raw_license=None):
     recs = []
     if not spdx_known or facts is None:
         recs.append("license 无法自动识别，需人工核实该包的 LICENSE 文件")
+        if raw_license and ("dual" in raw_license.lower()
+                            or " or " in raw_license.lower()
+                            or " and " in raw_license.lower()):
+            recs.append("该声明疑似双许可/复合许可（如 Apache-2.0 OR BSD-3-Clause）："
+                        "因 SPDX 单一值限制无法自动判定，建议人工确认后从最宽松条款选择")
     if risk == "high":
         recs.append("寻找更宽松的替代包，或将依赖隔离为独立进程/服务以避免传染")
     elif risk == "medium":
@@ -452,7 +460,7 @@ def analyze(deps, project_license="MIT", licenses=None, compat=None, pkg_map=Non
         strong_transitive = (is_transitive and facts
                              and facts["copyleft_scope"] in ("strong", "network"))
 
-        recs = _recommendations(spdx_known, facts, risk, rel, expr["op"])
+        recs = _recommendations(spdx_known, facts, risk, rel, expr["op"], raw)
         if strong_transitive:
             # 传递依赖的强传染最易被忽略：即使与项目 license 判定为兼容，
             # 也要显式提示沿依赖链复核传染范围。

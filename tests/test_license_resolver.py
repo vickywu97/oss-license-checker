@@ -186,5 +186,80 @@ class FallbackTest(unittest.TestCase):
         self.assertEqual(src, "mapping_table")
 
 
+class LicenseExpressionTest(unittest.TestCase):
+    def _write_dist(self, meta_text, lic_text="", lic_name="LICENSE.txt", name="demo-exp"):
+        tmp = tempfile.mkdtemp()
+        sp = os.path.join(tmp, "site-packages")
+        os.makedirs(sp)
+        dist = os.path.join(sp, f"{name}-1.0.0.dist-info")
+        os.makedirs(dist)
+        with open(os.path.join(dist, "METADATA"), "w", encoding="utf-8") as f:
+            f.write(meta_text)
+        if lic_text:
+            with open(os.path.join(dist, lic_name), "w", encoding="utf-8") as f:
+                f.write(lic_text)
+        return tmp
+
+    def test_license_expression_bsd3(self):
+        # PEP 639 License-Expression 应被直接读取（Werkzeug/MarkupSafe 实际声明）
+        tmp = self._write_dist(
+            "Name: demo-exp\nVersion: 1.0.0\n"
+            "License-Expression: BSD-3-Clause\nLicense-File: LICENSE.txt\n")
+        from oss_license_checker.license_resolver import read_local_metadata
+        self.assertEqual(
+            read_local_metadata("demo-exp", "1.0.0", "python", tmp), "BSD-3-Clause")
+
+    def test_license_expression_precedence_over_file(self):
+        # 即便同时有 License-File 指向无法识别的文本，License-Expression 优先
+        tmp = self._write_dist(
+            "Name: demo-exp2\nVersion: 1.0.0\n"
+            "License-Expression: MIT\nLicense-File: LICENSE.txt\n",
+            lic_text="Some proprietary-looking text without SPDX markers.\n",
+            name="demo-exp2")
+        from oss_license_checker.license_resolver import read_local_metadata
+        self.assertEqual(
+            read_local_metadata("demo-exp2", "1.0.0", "python", tmp), "MIT")
+
+    def test_python_metadata_bsd3_from_license_text(self):
+        # 老包只给 License-File，但 LICENSE 正文含禁止背书条款 → 识别为 BSD-3-Clause
+        bsd3 = ("Copyright 2020 X\n\nRedistribution and use in source and binary "
+                "forms, with or without modification, are permitted provided that "
+                "the following conditions are met:\n\n1. ...\n2. ...\n3. Neither "
+                "the name of the copyright holder nor the names of its "
+                "contributors may be used to endorse or promote products derived "
+                "from this software without specific prior written permission.\n")
+        tmp = tempfile.mkdtemp()
+        sp = os.path.join(tmp, "site-packages")
+        os.makedirs(sp)
+        dist = os.path.join(sp, "demo-bsd3-1.0.0.dist-info")
+        os.makedirs(dist)
+        with open(os.path.join(dist, "METADATA"), "w", encoding="utf-8") as f:
+            f.write("Name: demo-bsd3\nVersion: 1.0.0\nLicense-File: LICENSE.txt\n")
+        with open(os.path.join(dist, "LICENSE.txt"), "w", encoding="utf-8") as f:
+            f.write(bsd3)
+        from oss_license_checker.license_resolver import read_local_metadata
+        self.assertEqual(
+            read_local_metadata("demo-bsd3", "1.0.0", "python", tmp), "BSD-3-Clause")
+
+    def test_python_metadata_bsd2_from_license_text(self):
+        # 仅含经典两条 + 免责声明、无背书/广告条款 → 识别为 BSD-2-Clause
+        bsd2 = ("Copyright 2020 X\n\nRedistribution and use in source and binary "
+                "forms, with or without modification, are permitted provided that "
+                "the following conditions are met:\n\n1. ...\n2. ...\nTHIS SOFTWARE "
+                "IS PROVIDED AS IS.\n")
+        tmp = tempfile.mkdtemp()
+        sp = os.path.join(tmp, "site-packages")
+        os.makedirs(sp)
+        dist = os.path.join(sp, "demo-bsd2-1.0.0.dist-info")
+        os.makedirs(dist)
+        with open(os.path.join(dist, "METADATA"), "w", encoding="utf-8") as f:
+            f.write("Name: demo-bsd2\nVersion: 1.0.0\nLicense-File: LICENSE.txt\n")
+        with open(os.path.join(dist, "LICENSE.txt"), "w", encoding="utf-8") as f:
+            f.write(bsd2)
+        from oss_license_checker.license_resolver import read_local_metadata
+        self.assertEqual(
+            read_local_metadata("demo-bsd2", "1.0.0", "python", tmp), "BSD-2-Clause")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -76,11 +76,11 @@ python -m unittest discover -s tests -v
 
 ## license 真实来源解析（三级解析：本地元数据 → 映射表 → unknown）
 
-依赖的 license 不再只查「包名 → license」映射表（仅覆盖 138 个主流包），而是**优先读取已安装依赖自带的元数据**。实测覆盖率：npm 生态 98–100%，Python/PyPI 71–75%（分生态明细见下方「真实项目实测」）：
+依赖的 license 不再只查「包名 → license」映射表（仅覆盖 138 个主流包），而是**优先读取已安装依赖自带的元数据**（npm `license` / Python `License-Expression:` `License:` `Classifier:` `License-File:` / Go `LICENSE` 正文）。实测覆盖率：npm 生态 98–100%，Python/PyPI 75–100%（修复 `License-Expression` 支持后；分生态明细见下方「真实项目实测」）：
 
 | 优先级 | 来源 | 读取方式 | 可信度 |
 |--------|------|----------|--------|
-| 1 | **本地元数据** | npm `node_modules/<pkg>/package.json` 的 `license`/`licenses`；Python `site-packages/<pkg>-<ver>.dist-info/METADATA` 的 `License:` / `Classifier:`；Go `$GOMODCACHE/<module>@<ver>/LICENSE` 文件 | 最高（依赖自带） |
+| 1 | **本地元数据** | npm `node_modules/<pkg>/package.json` 的 `license`/`licenses`；Python `site-packages/<pkg>-<ver>.dist-info/METADATA` 的 `License-Expression:` / `License:` / `Classifier:`；`License-File:` 指向的 LICENSE 正文（识别 MIT/Apache/GPL/LGPL/MPL 及 BSD 2/3-Clause）；Go `$GOMODCACHE/<module>@<ver>/LICENSE` 文件 | 最高（依赖自带） |
 | 2 | **内置映射表** | `data/package_licenses.json`（138 个主流包，可能滞后） | 可信但有盲区 |
 | 3 | **unknown** | 两者都未命中 | 需人工核实 |
 
@@ -106,19 +106,20 @@ python -m unittest discover -s tests -v
 | npm 现代 · `request` | 47 | 47 | 0 | 0 | **100.0%** |
 | npm 遗留 · [bower](https://github.com/bower/bower)（已废弃） | 263 | 258 | 0 | 5 | **98.1%** |
 | npm 遗留 · `gulp@3.9.1` | 224 | 224 | 0 | 0 | **100.0%** |
-| **Python · `flask`** | 7 | 3 | 2 | 2 | **71.4%** |
+| **Python · `flask`** | 7 | 7 | 0 | 0 | **100.0%** |
 | **Python · `pandas`** | 4 | 2 | 1 | 1 | **75.0%** |
-| Python · `requests` | 5 | 2 | 3 | 0 | **100.0%** |
+| Python · `requests` | 5 | 4 | 1 | 0 | **100.0%** |
 
 **落 unknown 的包——按原因分类**（unknown 桶不掩盖，逐个说明为什么）：
 
 | 项目 | 包 | 原因 |
 |------|-----|------|
 | bower | `beaker@1.0.0` · `buffers@0.1.1` · `garply@` · `requireg@0.1.7` · `retry@0.6.1` | `package.json` **无 license 字段**（2017 年前后的老包，发布时未声明） |
-| flask | `Werkzeug@3.1.8` · `MarkupSafe@3.0.3` | **只给了 `License-File` 指针**，指向的 LICENSE 是 BSD 变体，正文无法区分 2-Clause / 3-Clause → 不猜 |
-| pandas | `python-dateutil@2.9.0.post0` | `License` 字段写作 **`"Dual License"`**，无法归一化为具体 SPDX → 不猜 |
+| pandas | `python-dateutil@2.9.0.post0` | `License` 字段写作 **`"Dual License"`**（实为 Apache-2.0 OR BSD-3-Clause），SPDX 单一值无法表达「或」，且本工具不猜测 → 不猜 |
 
-一个诚实的观察：**npm 生态自 2014 年起 license 字段就已高度规范**，连 2015 年代的 `gulp@3` / `browserify@10` 实测也在 95% 以上；真正拉低覆盖率的是 **Python/PyPI**——元数据声明方式不统一（`License:` / `Classifier:` / `License-File:` 三种并存，且常有 `UNKNOWN` 或 `"Dual License"` 这类含糊写法）。
+> **关于 Werkzeug / MarkupSafe（诚实更正）**：早一版测得二者落 unknown，当时归因为「只给了 `License-File` 指针、BSD 变体正文无法区分 2/3-Clause」。复查真实文件后发现——二者 METADATA **明确声明 `License-Expression: BSD-3-Clause`**，且 LICENSE 正文含 3-Clause 的禁止背书条款。落 unknown 是**解析器的能力缺口**（漏读 `License-Expression` 字段、且对 BSD 正文一律拒识），并非「诚实的不猜」。已修复：新增 `License-Expression` 支持 + 从 LICENSE 正文识别 BSD 2/3-Clause 特征句，flask 覆盖率由 71.4% 升至 100%。这正说明「不猜」只应留给**真正含糊**的声明，不能把能力缺口包装成克制。
+
+一个诚实的观察：**npm 生态自 2014 年起 license 字段就已高度规范**，连 2015 年代的 `gulp@3` / `browserify@10` 实测也在 95% 以上；**Python/PyPI** 的剩余覆盖率缺口主要来自两类——① 双许可/复合声明（`"Dual License"`、`Apache-2.0 OR BSD-3-Clause`）：SPDX 单一值无法表达「或」，本工具不猜测；② 极少数老包用含广告条款的 4-Clause 等罕见变体。凡是 `License-Expression` / `License:` / `Classifier:` 能明确判定的（含 LICENSE 正文含禁止背书条款的 BSD-3-Clause），解析器现已全部读取，不再假装读不出。
 
 #### 为什么覆盖率不是核心
 
@@ -128,7 +129,7 @@ python -m unittest discover -s tests -v
 - **法律级义务清单**：署名、公开源码、提供安装说明、附许可全文等**具体义务**，而不是一句"GPL 有传染性"
 - **传染路径分析**：GPL/AGPL 究竟从哪个**传递依赖**进来（见下节）——这是最容易被忽略、后果最严重的一类风险
 
-> **「不猜」是刻意的取舍**：含糊写法（纯 `BSD`、`"Dual License"`、`License-File` 指向无法识别的文件）一律标 `unknown` **并写明原因**，而不是输出一个可能错误的 SPDX id。在合规场景里，一个错误的判定比一句「需人工核实」危险得多。
+> **「不猜」是刻意的取舍，但只留给真正含糊的声明**：纯 `BSD`（无版本）、`"Dual License"`（双许可）、含广告条款的 4-Clause、LICENSE 正文确实读不出 SPDX 的文件，一律标 `unknown` **并写明原因**。但凡是能明确判定的——METADATA 的 `License-Expression` / `License:` / `Classifier:` 声明、LICENSE 正文含禁止背书条款的 BSD-3-Clause——解析器会直接识别，**不会假装读不出**。对于 `"Dual License"` 这类双许可，报告会额外提示「可从宽选择、建议人工确认后取最宽松方案」，不影响判定的诚实性。在合规场景里，一个错误的判定比一句「需人工核实」危险得多；但把能力缺口包装成克制，同样会误导专业读者。
 
 ### 传递依赖分析（GPL / AGPL 传染路径）
 
@@ -145,6 +146,7 @@ gpl-transitive-demo (MIT)
 - **优雅降级**：无 lock 文件时只分析直接依赖并在报告中说明原因；Go 模块图本身不提供边信息，明确标注「传递依赖未分析」而不是假装算得出
 - **安全约束**：BFS 带 visited 集合 + 20 层深度上限，依赖环不会导致无限递归
 - **CI 门禁**：`--transitive --fail-on high` 会把强传染传递依赖视同 high 并以非零码退出
+- **路径展示**：当前展示从项目根到传染终点的**最短路径**；若同一强传染依赖存在多条引入路径，完整路径枚举为 Phase 2 增强（不影响「存在传染」的判定结论）
 
 真实项目实测（依赖图基于 lock 文件）：
 

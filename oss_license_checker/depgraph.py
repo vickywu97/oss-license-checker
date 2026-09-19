@@ -458,8 +458,9 @@ def analyze_transitive(nodes, project_name="my-project", project_license="MIT",
     """汇总依赖图：直接/传递计数 + 强/弱传染清单 + 传染路径。"""
     warnings = list(warnings or [])
     if _assign_depths(nodes):
-        warnings.append(f"依赖层级超过上限（{MAX_DEPTH} 层），"
-                        "更深的依赖已按上限层数饱和处理，请人工复核")
+        warnings.append(
+            f"依赖层级达到深度上限（{MAX_DEPTH} 层）：超过该深度的传递依赖"
+            f"可能未被完整分析，已按上限层数饱和标记，请人工复核更深层依赖")
     path_of = _shortest_paths(nodes)
 
     direct = [n for n in nodes.values() if n.is_direct]

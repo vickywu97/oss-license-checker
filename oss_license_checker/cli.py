@@ -8,7 +8,8 @@
 import argparse
 import sys
 
-from .engine import load_licenses, scan, scan_with_graph
+from .engine import load_licenses, scan, scan_with_graph, normalize_license
+from .depgraph import classify_contagion
 from .report import render
 
 
@@ -69,9 +70,13 @@ def main(argv=None):
         order = {"low": 1, "medium": 2, "high": 3}
         hits = [r for r in results if order.get(r["risk_level"], 0) >= order[args.fail_on]]
         # 传递依赖的强传染（GPL/AGPL）视同 high：这类风险最易被遗漏
-        hits += [r for r in results
-                 if r.get("infection_path") and order["high"] >= order[args.fail_on]
-                 and r not in hits]
+        # 但若项目自身即为强传染（GPL/AGPL），其 GPL/AGPL 依赖属合规，不应误报 fail
+        project_strong = classify_contagion(
+            normalize_license(args.project_license)) == "strong"
+        if not project_strong:
+            hits += [r for r in results
+                     if r.get("infection_path") and order["high"] >= order[args.fail_on]
+                     and r not in hits]
         if hits:
             print(f"❌ CI 门禁未通过：{len(hits)} 个依赖风险等级达到或超过 --fail-on={args.fail_on}", file=sys.stderr)
             return 1
