@@ -189,6 +189,8 @@ demo 见 [`demo/with_gpl_transitive/`](demo/with_gpl_transitive/) + [`demo/repor
 
 本工具输出为自动化初筛结果，**不构成法律意见**。license 事实与兼容性以官方文本为准（本库以 SPDX 官方列表 + FSF 兼容性清单为来源，附核验日期）。最终合规判断请咨询执业律师。
 
+> **审计方法说明**：本项目的诚实性相关发现（Python / PyPI 覆盖率的两处「**能力缺口伪装成克制**」更正 —— 见上文 Werkzeug / MarkupSafe 与 `python-dateutil` 的诚实更正；兼容性争议项的显式标注 —— 见「内置事实库」）已整合在本文档对应章节，**未单独成篇审计报告**。跨项目审计方法论（真克制 vs 能力缺口的区分纪律、8 条元教训）参见 [token-classifier 的 `docs/HONESTY_AUDIT.md`](https://github.com/vickywu97/token-classifier/blob/master/docs/HONESTY_AUDIT.md)。
+
 ## 作品集关系
 
 | 项目 | 合规领域 | 判定性质 |
